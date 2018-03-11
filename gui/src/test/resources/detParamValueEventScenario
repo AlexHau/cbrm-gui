@@ -1,0 +1,8 @@
+EventScenario[detParamValue(?bc)->?val]:-?val:EventScenario,(?bc:SemNOTAMCase[notam->?n:NOTAM],?n[feature->runway,status->closed],?val=runwayClosure)@bc.
+EventScenario[detParamValue(?bc)->?val]:-?val:EventScenario,(?bc:SemNOTAMCase[notam->?n:NOTAM],?n[feature->runway,status->limited],?val=runwayClosure)@bc.
+EventScenario[detParamValue(?bc)->?val]:-?val:EventScenario,(?bc:SemNOTAMCase[notam->?n:NOTAM],?n[feature->apron,status->closed],?val=apronClosure)@bc.
+EventScenario[detParamValue(?bc)->?val]:-?val:EventScenario,(?bc:SemNOTAMCase[notam->?n:NOTAM],?n[feature->obstruction],?val=obstruction)@bc.
+EventScenario[detParamValue(?bc)->?val]:-?val:EventScenario,(?bc:SemNOTAMCase[notam->?n:NOTAM],?n[feature->heliport],?val=heliport)@bc.
+EventScenario[detParamValue(?bc)->?val]:-?val:EventScenario,(?bc:SemNOTAMCase[notam->?n:NOTAM],?n[feature->waterlaneSki],?val=waterlaneSki)@bc.
+EventScenario[detParamValue(?bc)->?val]:-?val:EventScenario,(?bc:SemNOTAMCase[notam->?n:NOTAM],?n[feature->aerodromeBeacon],?val=aerodromeBeaconStatus)@bc.
+EventScenario[detParamValue(?bc)->?val]:-?val:EventScenario,(?bc:SemNOTAMCase[notam->?n:NOTAM],?n[feature->aerodromeILS],?val=aerodromeEquipment)@bc.

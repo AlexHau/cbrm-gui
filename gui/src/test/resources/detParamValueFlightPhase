@@ -1,0 +1,1 @@
+FlightPhase[detParamValue(?bc)->?val]:-?val:FlightPhase,(?bc:SemNOTAMCase[interestSpec->?[flightPhase->?val]])@bc.

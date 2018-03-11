@@ -1,0 +1,3 @@
+Interest[detParamValue(?bc)->?val]:-?val:Interest,(?bc:SemNOTAMCase[interestSpec->?[interest->?aircraft]])@bc,getAircraftType(?aircraft,?val).
+getAircraftType(Boeing_737,landplane).
+getAircraftType(Bell_Augusta,helicopter).

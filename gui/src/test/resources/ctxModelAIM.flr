@@ -1,0 +1,71 @@
+/***************************************************************/
+/*TheextensionofthemainfileforAIM*/
+/**/
+/*FelixBurgstaller*/
+/*Version:0.4*/
+/*Date:18.7.2017*/
+/**/
+/*ThisfilecontainstheAIMspecificcontextmodels*/
+/**/
+/**/
+/***************************************************************/
+#include"ctxModel.flr"
+
+//## Parameters
+Interest:Parameter.
+FlightPhase:Parameter.
+EventsScenario:Parameter.
+
+//DeterminesforagiveninterestspecificationitsParameteralvalues,thecheck?val:<Parameter>ensuresthat
+//onlyvalidparametervaluesarereturned(e.g.deletedonesarenotreturned)
+//Give:?bc..SemNOTAMCase
+//Return:?val..theParametervaluesderivedfrom?data
+//## Determine-Parameter-Value
+Interest[detParamValue(?bc)->?val]:-?val:Interest,(?bc:SemNOTAMCase[interestSpec->?[interest->?aircraft]])@bc,getAircraftType(?aircraft,?val).
+getAircraftType(Boeing_737,landplane).
+getAircraftType(Bell_Augusta,helicopter).
+FlightPhase[detParamValue(?bc)->?val]:-?val:FlightPhase,(?bc:SemNOTAMCase[interestSpec->?[flightPhase->?val]])@bc.
+EventScenario[detParamValue(?bc)->?val]:-?val:EventScenario,(?bc:SemNOTAMCase[notam->?n:NOTAM],?n[feature->runway,status->closed],?val=runwayClosure)@bc.
+EventScenario[detParamValue(?bc)->?val]:-?val:EventScenario,(?bc:SemNOTAMCase[notam->?n:NOTAM],?n[feature->runway,status->limited],?val=runwayClosure)@bc.
+EventScenario[detParamValue(?bc)->?val]:-?val:EventScenario,(?bc:SemNOTAMCase[notam->?n:NOTAM],?n[feature->apron,status->closed],?val=apronClosure)@bc.
+EventScenario[detParamValue(?bc)->?val]:-?val:EventScenario,(?bc:SemNOTAMCase[notam->?n:NOTAM],?n[feature->obstruction],?val=obstruction)@bc.
+EventScenario[detParamValue(?bc)->?val]:-?val:EventScenario,(?bc:SemNOTAMCase[notam->?n:NOTAM],?n[feature->heliport],?val=heliport)@bc.
+EventScenario[detParamValue(?bc)->?val]:-?val:EventScenario,(?bc:SemNOTAMCase[notam->?n:NOTAM],?n[feature->waterlaneSki],?val=waterlaneSki)@bc.
+EventScenario[detParamValue(?bc)->?val]:-?val:EventScenario,(?bc:SemNOTAMCase[notam->?n:NOTAM],?n[feature->aerodromeBeacon],?val=aerodromeBeaconStatus)@bc.
+EventScenario[detParamValue(?bc)->?val]:-?val:EventScenario,(?bc:SemNOTAMCase[notam->?n:NOTAM],?n[feature->aerodromeILS],?val=aerodromeEquipment)@bc.
+
+//## Domain-Context-Model
+AIMCtx:ContextClass[defBy->{Interest,FlightPhase,EventScenario}].
+
+//## Parameter-Values
+{allInterests,area,aircraft,landplane,seaplane,helicopter,unspecifiedAircraft,time}:Interest.
+{allFlightPhases,onground,departure,enroute,arrival,dispatch}:FlightPhase.
+{allEventScenarios,specialPort,heliport,waterlaneSki,obstruction,closure,runwayClosure,apronClosure,aerodromeBeaconStatus,aerodromeEquipment}:EventScenario.
+
+//## Parameter-Hierarchy
+allInterests[covers->{area,aircraft,time}].
+aircraft[covers->{landplane,seaplane,helicopter,unspecifiedAircraft}].
+allFlightPhases[covers->{onground,departure,enroute,arrival,dispatch}].
+allEventScenarios[covers->{specialPort,obstruction,closure,aerodromeBeaconStatus,aerodromeEquipment}].
+specialPort[covers->{heliport,waterlaneSki}].
+closure[covers->{runwayClosure,apronClosure}].
+
+//## Contexts
+allInterests_allFlightPhases_allEventScenarios:AIMCtx[Interest->allInterests,FlightPhase->allFlightPhases,EventScenario->allEventScenarios,
+											file->'OO/Contexts/allInterests_allFlightPhases_allEventScenarios.flr'].
+aircraft_allFlightPhases_obstruction:AIMCtx[Interest->aircraft,FlightPhase->allFlightPhases,EventScenario->obstruction,
+											file->'OO/Contexts/aircraft_allFlightPhases_obstruction.flr'].
+helicopter_allFlightPhases_obstruction:AIMCtx[Interest->helicopter,FlightPhase->allFlightPhases,EventScenario->obstruction,
+											file->'OO/Contexts/helicopter_allFlightPhases_obstruction.flr'].
+aircraft_onground_closure:AIMCtx[Interest->aircraft,FlightPhase->onground,EventScenario->closure,
+											file->'OO/Contexts/aircraft_onground_closure.flr'].
+landplane_onground_runwayClosure:AIMCtx[Interest->landplane,FlightPhase->onground,EventScenario->runwayClosure,
+											file->'OO/Contexts/landplane_onground_runwayClosure.flr'].
+landplane_allFlightPhases_specialPort:AIMCtx[Interest->landplane,FlightPhase->allFlightPhases,EventScenario->specialPort,
+											file->'OO/Contexts/landplane_allFlightPhases_specialPort.flr'].
+landplane_allFlightPhases_aerodromeBeaconStatus:AIMCtx[Interest->landplane,FlightPhase->allFlightPhases,EventScenario->aerodromeBeaconStatus,
+											file->'OO/Contexts/landplane_allFlightPhases_aerodromeBeaconStatus.flr'].
+aircraft_onground_aerodromeEquipment:AIMCtx[Interest->aircraft,FlightPhase->onground,EventScenario->aerodromeEquipment,
+											file->'OO/Contexts/aircraft_onground_aerodromeEquipment.flr'].
+aircraft_arrival_closure:AIMCtx[Interest->aircraft,FlightPhase->arrival,EventScenario->closure,
+											file->'OO/Contexts/aircraft_arrival_closure.flr'].

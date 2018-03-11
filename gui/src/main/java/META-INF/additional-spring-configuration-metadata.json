@@ -1,0 +1,37 @@
+{"properties": [
+  {
+    "name": "cbrm.contexts.folder.path",
+    "type": "java.lang.String",
+    "description": "holds the file-system-path to the folder where CBRM Contexts .flr-Files reside"
+  },
+  {
+    "name": "cbrm.context.model.aim.path",
+    "type": "java.lang.String",
+    "description": "A description for 'cbrm.context.model.aim.path'"
+  },
+  {
+    "name": "cbrm.business.context.model.path",
+    "type": "java.lang.String",
+    "description": "A description for 'cbrm.business.context.model.path'"
+  },
+  {
+    "name": "cbrm.context.class",
+    "type": "java.lang.String",
+    "description": "A description for 'cbrm.context.class'"
+  },
+  {
+    "name": "cbrm.business.case.class",
+    "type": "java.lang.String",
+    "description": "A description for 'cbrm.business.case.class'"
+  },
+  {
+    "name": "cbrm.flora.run.path",
+    "type": "java.lang.String",
+    "description": "A description for 'cbrm.flora.run.path'"
+  },
+  {
+    "name": "cbrm.workspace",
+    "type": "java.lang.String",
+    "description": "A description for 'cbrm.workspace'"
+  }
+]}
