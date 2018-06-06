@@ -16,10 +16,9 @@ public interface UserRepository extends CrudRepository<User, Long> {
     public User findByUserName(@Param("userName") String userName);
 
     @Query("select user from Context ctx join ctx.allowedUsers user join user.roles role"
-	    + " where ctx.contextId = :contextId and role.name = :roleName")
-    public Iterable<User> getAllowedUsersByContextIdAndRole(
-	    @Param("contextId") Long contextId,
-	    @Param("roleName") String roleName);
+	    + " where ctx.contextId = :contextId")
+    public Iterable<User> getAllowedUsersByContextId(
+	    @Param("contextId") Long contextId);
 
     @Query("select role from User user join user.roles role where user.id = :userId ")
     public Iterable<Role> loadRoleForUser(@Param("userId") Long userId);
@@ -27,5 +26,4 @@ public interface UserRepository extends CrudRepository<User, Long> {
     @Query("select user from User user join user.roles role where role.name = :roleName ")
     public Iterable<User> getUsersByRoleName(
 	    @Param("roleName") String roleRuleDev);
-
 }

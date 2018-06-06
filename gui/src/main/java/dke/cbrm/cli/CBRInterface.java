@@ -3,6 +3,7 @@ package dke.cbrm.cli;
 import java.io.IOException;
 import java.util.List;
 
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Scope;
 import org.springframework.stereotype.Service;
@@ -23,12 +24,6 @@ public class CBRInterface extends Flora2CLI {
     @Setter
     private ContextModel contextModel;
 
-    private String modelModule;
-
-    private final String bcModule = "bc";
-
-    private String businessCaseClass;
-
     /**
      * Initializes a Flora 2 shell with the CBR Model and the business
      * cases, the contextClass specifies the name of the context class
@@ -40,14 +35,16 @@ public class CBRInterface extends Flora2CLI {
     // @Value("${cbrm.business.context.model.path}") String
     // businessContext,
     // @Value("${cbrm.context.class}") String contextModel
-    // ,@Value("${cbrm.business.case.class}") String businessCaseClass
+    // ,@Value("${cbrm.business.case.class}") String
+    // contextModel.getBusinessCaseClass()
     ) throws IOException {
 
 	super(floraRunPath);
 
-	// this.businessCaseClass = businessCaseClass;
+	// this.contextModel.getBusinessCaseClass() =
+	// contextModel.getBusinessCaseClass();
 	// this.contextModel = contextModel;
-	
+
 	/**
 	 * if (!loadFile(businessContext, BC_MODULE)) throw new
 	 * IOException("Loading module failed");
@@ -55,8 +52,16 @@ public class CBRInterface extends Flora2CLI {
     }
 
     public void loadFile(ContextModel contextModel) throws IOException {
-	if (!loadFile(contextModel.getContextModelFilePath(), contextModel.getModuleName()))
+	if (!loadFile(contextModel.getContextModelFilePath(),
+		contextModel.getContextModelModuleName()))
 	    throw new IOException("Loading module failed");
+	if (StringUtils.isNotEmpty(contextModel.getBusinessContextFilePath())
+		&& StringUtils.isNotEmpty(
+			contextModel.getBusinessContextModuleName())) {
+	    loadFile(contextModel.getBusinessContextFilePath(),
+		    contextModel.getBusinessContextModuleName());
+	    // throw new IOException("Loading module failed");
+	}
     }
 
     // -----------------------------------------------------------------------------
@@ -70,7 +75,7 @@ public class CBRInterface extends Flora2CLI {
      */
     public List<String> getCtxs() throws IOException {
 	String cmd = String.format("?ctx:%s@%s.", contextModel.getName(),
-		modelModule);
+		contextModel.getContextModelModuleName());
 	String ret = issueCommand(cmd);
 	return parseSingleVar(ret);
     }
@@ -84,7 +89,8 @@ public class CBRInterface extends Flora2CLI {
     public List<String[]> getCtxHierarchy() throws IOException {
 	String cmd = String.format(
 		"?subCtx:%s[specialises->?superCtx]@%s, \\+ (?superCtx =?subCtx).",
-		contextModel.getName(), contextModel.getModuleName());
+		contextModel.getName(),
+		contextModel.getContextModelModuleName());
 	String ret = issueCommand(cmd);
 	return parseMultipleVars(ret, 2);
     }
@@ -98,7 +104,8 @@ public class CBRInterface extends Flora2CLI {
      */
     public String getCtxFile(String ctx) throws IOException {
 	String cmd = String.format("%s:%s[file->?ctxf]@%s.", ctx,
-		contextModel.getName(), contextModel.getModuleName());
+		contextModel.getName(),
+		contextModel.getContextModelModuleName());
 	String ret = issueCommand(cmd);
 	return parseSingleVar(ret).get(0);
     }
@@ -110,7 +117,8 @@ public class CBRInterface extends Flora2CLI {
      */
     public List<String[]> getCtx(String ctx) throws IOException {
 	String cmd = String.format("(%s:%s[?val:Parameter->?ctx])@%s.", ctx,
-		contextModel.getName(), contextModel.getModuleName());
+		contextModel.getName(),
+		contextModel.getContextModelModuleName());
 	String ret = issueCommand(cmd);
 	return parseMultipleVars(ret, 2);
     }
@@ -123,7 +131,7 @@ public class CBRInterface extends Flora2CLI {
      */
     public List<String> getParameters() throws IOException {
 	String cmd = String.format("?param:Parameter@%s.",
-		contextModel.getModuleName());
+		contextModel.getContextModelModuleName());
 	String ret = issueCommand(cmd);
 	return parseSingleVar(ret);
     }
@@ -136,9 +144,24 @@ public class CBRInterface extends Flora2CLI {
      */
     public List<String> getParameterValues() throws IOException {
 	String cmd = String.format("(?val:?_param,?_param:Parameter)@%s.",
-		contextModel.getModuleName());
+		contextModel.getContextModelModuleName());
 	String ret = issueCommand(cmd);
 	return parseSingleVar(ret);
+    }
+    
+    /**
+     * Find context constituting parameter-values for given context
+     * 
+     * @param ctx, the given context-name for identifying parameter-values
+     * @return parameter-values constituting the given context
+     * @throws IOException
+     */
+    public List<String[]> getCtxInfo(String ctx) throws IOException {
+	String cmd = String.format("(%s:%s[?val:Parameter->?ctx])@%s.", ctx,
+		contextModel.getName(),
+		contextModel.getContextModelModuleName());
+	String ret = issueCommand(cmd);
+	return parseMultipleVars(ret, 2);
     }
 
     /**
@@ -152,7 +175,7 @@ public class CBRInterface extends Flora2CLI {
 	    throws IOException {
 	String cmd = String.format(
 		"?superVal:%s[covers->?subVal:%s]@%s, \\+ (?superVal = ?subVal).",
-		parameter, parameter, contextModel.getModuleName());
+		parameter, parameter, contextModel.getContextModelModuleName());
 	String ret = issueCommand(cmd);
 	return parseMultipleVars(ret, 2);
     }
@@ -169,7 +192,7 @@ public class CBRInterface extends Flora2CLI {
      */
     public List<String> detRelevantCtxs(String bc) throws IOException {
 	String cmd = String.format("%s[detRelevantCtxs(%s)->?ctx]@%s.",
-		contextModel, bc, modelModule);
+		contextModel, bc, contextModel.getContextModelModuleName());
 	String ret = issueCommand(cmd);
 	return parseSingleVar(ret);
     }
@@ -186,9 +209,9 @@ public class CBRInterface extends Flora2CLI {
     public List<String> detCaseSpecificCtx(String bc, String targetModule)
 	    throws IOException {
 	checkTargetModule(targetModule);
-	String cmd =
-		String.format("%s[%%detCleanCaseSpecificCtx(%s,%s,?ctxf)]@%s.",
-			contextModel, bc, targetModule, modelModule);
+	String cmd = String.format(
+		"%s[%%detCleanCaseSpecificCtx(%s,%s,?ctxf)]@%s.", contextModel,
+		bc, targetModule, contextModel.getContextModelModuleName());
 	String ret = issueCommand(cmd);
 	return parseSingleVar(ret);
 
@@ -202,8 +225,9 @@ public class CBRInterface extends Flora2CLI {
      * @throws IOException
      */
     public boolean newBusinessCase(String bcDef) throws IOException {
-	String cmd = String.format("%s[%%newBC(%s)]@%s.", businessCaseClass,
-		bcDef, bcModule);
+	String cmd = String.format("%s[%%newBC(%s)]@%s.",
+		contextModel.getBusinessCaseClass(), bcDef,
+		contextModel.getBusinessContextModuleName());
 	String ret = issueCommand(cmd);
 	return ret.endsWith("Yes\n");
 
@@ -237,8 +261,9 @@ public class CBRInterface extends Flora2CLI {
      * @throws IOException
      */
     public boolean addCtx(String ctxDef) throws IOException {
-	String cmd = String.format("%s[%%addCtx(%s)]@%s.", contextModel, ctxDef,
-		modelModule);
+	String cmd =
+		String.format("%s[%%addCtx(%s)]@%s.", contextModel.getName(),
+			ctxDef, contextModel.getContextModelModuleName());
 	String ret = issueCommand(cmd);
 	return ret.equals("Yes\n");
     }
@@ -251,8 +276,9 @@ public class CBRInterface extends Flora2CLI {
      * @throws IOException
      */
     public boolean delCtx(String ctx) throws IOException {
-	String cmd = String.format("%s[%%delCtx(%s)]@%s.", contextModel, ctx,
-		modelModule);
+	String cmd =
+		String.format("%s[%%delCtx(%s)]@%s.", contextModel.getName(),
+			ctx, contextModel.getContextModelModuleName());
 	String ret = issueCommand(cmd);
 	return ret.equals("Yes\n");
     }
@@ -264,8 +290,9 @@ public class CBRInterface extends Flora2CLI {
      * @throws IOException
      */
     public boolean delCtxByParameterValue() throws IOException {
-	String cmd = String.format("%s[%%delCtxByValue]@%s.", contextModel,
-		modelModule);
+	String cmd =
+		String.format("%s[%%delCtxByValue]@%s.", contextModel.getName(),
+			contextModel.getContextModelModuleName());
 	String ret = issueCommand(cmd);
 	return ret.endsWith("Yes\n");
     }
@@ -282,7 +309,8 @@ public class CBRInterface extends Flora2CLI {
     public boolean modifyCtxByParameterValue(String oldParamValue,
 	    String newParamValue) throws IOException {
 	String cmd = String.format("%s[%%modCtxByValue(%s,%s,?ctx)]@%s.",
-		contextModel, oldParamValue, newParamValue, modelModule);
+		contextModel, oldParamValue, newParamValue,
+		contextModel.getContextModelModuleName());
 	String ret = issueCommand(cmd);
 	return ret.endsWith("Yes\n");
     }
@@ -301,7 +329,8 @@ public class CBRInterface extends Flora2CLI {
     public boolean addParameter(String name, String rootValue,
 	    String detParamDef) throws IOException {
 	String cmd = String.format("%s[%%addParam(%s,%s,?ctx,%s)]@%s.",
-		contextModel, name, rootValue, detParamDef, modelModule);
+		contextModel.getName(), name, rootValue, detParamDef,
+		contextModel.getContextModelModuleName());
 	String ret = issueCommand(cmd);
 	return ret.endsWith("Yes\n");
     }
@@ -314,8 +343,9 @@ public class CBRInterface extends Flora2CLI {
      * @throws IOException
      */
     public boolean delParameter(String name) throws IOException {
-	String cmd = String.format("%s[%%delParam(%s,?ctx)]@%s.", contextModel,
-		name, modelModule);
+	String cmd = String.format("%s[%%delParam(%s,?ctx)]@%s.",
+		contextModel.getName(), name,
+		contextModel.getContextModelModuleName());
 	String ret = issueCommand(cmd);
 	return ret.endsWith("Yes\n");
     }
@@ -331,8 +361,9 @@ public class CBRInterface extends Flora2CLI {
      */
     public boolean addParameterValueLeaf(String name, String parent)
 	    throws IOException {
-	String cmd = String.format("%s[%%addValueLeaf(%s,%s)]@%s.",
-		contextModel, name, parent, modelModule);
+	String cmd =
+		String.format("%s[%%addValueLeaf(%s,%s)]@%s.", contextModel,
+			name, parent, contextModel.getContextModelModuleName());
 	String ret = issueCommand(cmd);
 	return ret.endsWith("Yes\n");
     }
@@ -355,7 +386,8 @@ public class CBRInterface extends Flora2CLI {
 	}
 	childs.delete(childs.length() - 1, childs.length());
 	String cmd = String.format("%s[%%addValueNode(%s,%s,{%s})]@%s.",
-		contextModel, name, parent, childs, modelModule);
+		contextModel, name, parent, childs,
+		contextModel.getContextModelModuleName());
 	String ret = issueCommand(cmd);
 	return ret.endsWith("Yes\n");
     }
@@ -370,8 +402,9 @@ public class CBRInterface extends Flora2CLI {
      */
     public boolean addParameterValueRoot(String name, String child)
 	    throws IOException {
-	String cmd = String.format("%s[%%addValueRoot(%s,%s)]@%s.",
-		contextModel, name, child, modelModule);
+	String cmd =
+		String.format("%s[%%addValueRoot(%s,%s)]@%s.", contextModel,
+			name, child, contextModel.getContextModelModuleName());
 	String ret = issueCommand(cmd);
 	return ret.endsWith("Yes\n");
     }
@@ -385,7 +418,7 @@ public class CBRInterface extends Flora2CLI {
      */
     public boolean delParameterValueSubgraph(String name) throws IOException {
 	String cmd = String.format("%s[%%delValueSubGraph(%s)]@%s.",
-		contextModel, name, modelModule);
+		contextModel, name, contextModel.getContextModelModuleName());
 	String ret = issueCommand(cmd);
 	return ret.endsWith("Yes\n");
     }
@@ -399,7 +432,7 @@ public class CBRInterface extends Flora2CLI {
      */
     public boolean delParameterValue(String name) throws IOException {
 	String cmd = String.format("%s[%%delValue(%s,?parent)]@%s.",
-		contextModel, name, modelModule);
+		contextModel, name, contextModel.getContextModelModuleName());
 	String ret = issueCommand(cmd);
 	return ret.endsWith("Yes\n");
     }
@@ -413,7 +446,7 @@ public class CBRInterface extends Flora2CLI {
      */
     public List<String> detUnusedParameterValues() throws IOException {
 	String cmd = String.format("%s[detUnusedValues->?v]@%s.", contextModel,
-		modelModule);
+		contextModel.getContextModelModuleName());
 	String ret = issueCommand(cmd);
 	return parseSingleVar(ret);
 

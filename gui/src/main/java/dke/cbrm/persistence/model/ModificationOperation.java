@@ -15,6 +15,8 @@ import javax.persistence.JoinColumn;
 import javax.persistence.OneToMany;
 import javax.persistence.OneToOne;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
 import dke.cbrm.persistence.LocalDateTimeConverter;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -22,6 +24,8 @@ import lombok.EqualsAndHashCode;
 @Entity
 @Data
 @EqualsAndHashCode(exclude = "approvals")
+@JsonIgnoreProperties(
+	value = { "before", "after", "approvals", "modifiedAt", "createdAt" })
 public class ModificationOperation {
 
     private @Id @GeneratedValue @Column(name = "ID") Long id;
@@ -31,6 +35,10 @@ public class ModificationOperation {
     @Convert(converter = LocalDateTimeConverter.class)
     private LocalDateTime modifiedAt, createdAt;
 
+    @OneToOne
+    @JoinColumn(name = "CREATED_BY")
+    private User createdBy;
+
     @OneToMany(
 	    mappedBy = "modificationOperationApproved",
 	    cascade = CascadeType.ALL,
@@ -38,13 +46,31 @@ public class ModificationOperation {
     private Set<ModificationApproval> approvals =
 	    new HashSet<ModificationApproval>();
 
-    private String contentBefore, contentAfter;
-
     @OneToOne
-    @JoinColumn(name = "MOD_OP_ID_BEFORE")
+    @JoinColumn(name = "MOD_OP_BEFORE_ID")
     private ModificationOperation before;
 
     @OneToOne
-    @JoinColumn(name = "MOD_OP_ID_AFTER")
-    private ModificationOperation after;
+    @JoinColumn(name = "CTX_AFFECTED_ID")
+    private Context contextAffected;
+
+    @OneToOne
+    @JoinColumn(name = "CTX_1ST_SPLIT_ID")
+    private Context firstSplitContext;
+
+    @OneToOne
+    @JoinColumn(name = "CTX_2ND_SPLIT_ID")
+    private Context secondSplitContext;
+
+    @OneToOne
+    @JoinColumn(name = "RULE_ID")
+    private Rule ruleAffected;
+
+    @OneToOne
+    @JoinColumn(name = "PARAMETER_ID")
+    private Parameter parameterAffected;
+
+    public String toString() {
+	return modificationOperationType.name() + " is being conducted";
+    }
 }

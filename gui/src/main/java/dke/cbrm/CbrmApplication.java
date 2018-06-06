@@ -6,11 +6,14 @@ import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.DependsOn;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+
+import dke.cbrm.business.statemachine.StateMachineJpaConfigurationInitializer;
 
 @SpringBootApplication
 @EnableJpaRepositories
-@EntityScan("dke.cbrm.persistence.model")
+@EntityScan(value = { "dke.cbrm.persistence.model", "dke.cbrm.business", "dke.cbrm.business.statemachine" })
 @EnableAutoConfiguration
 public class CbrmApplication {
 
@@ -18,6 +21,17 @@ public class CbrmApplication {
 	// startH2Server();
 	SpringApplication.run(CbrmApplication.class);
     }
+
+    // @Bean(name = "OBJECT_MAPPER_BEAN")
+    // public ObjectMapper jsonObjectMapper() {
+    // return Jackson2ObjectMapperBuilder.json()
+    // .serializationInclusion(JsonInclude.Include.NON_NULL) // Don’t
+    // include null values
+    // .featuresToDisable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
+    // //ISODate
+    // .modules(new JavaTimeModule())
+    // .build();
+    // }
 
     // private static void startH2Server() {
     // try {
@@ -78,5 +92,13 @@ public class CbrmApplication {
     // initializer.initializeUsers();
     // };
     // }
-
+    //
+    // @Bean
+    // @DependsOn("createUsers")
+    // public CommandLineRunner createStates(
+    // StateMachineJpaConfigurationInitializer initializer) {
+    // return (args) -> {
+    // initializer.initializeJpaStateMachineRepository();
+    // };
+    // }
 }

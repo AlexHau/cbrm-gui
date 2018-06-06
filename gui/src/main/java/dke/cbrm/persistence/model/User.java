@@ -1,7 +1,9 @@
 package dke.cbrm.persistence.model;
 
+import java.util.HashSet;
 import java.util.Set;
 
+import javax.persistence.CascadeType;
 import javax.persistence.Entity;
 import javax.persistence.FetchType;
 import javax.persistence.GeneratedValue;
@@ -12,6 +14,8 @@ import javax.persistence.JoinTable;
 import javax.persistence.ManyToMany;
 import javax.persistence.Table;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
@@ -19,6 +23,8 @@ import lombok.EqualsAndHashCode;
 @Data
 @Table(name = "`User`")
 @EqualsAndHashCode(exclude = { "roles" })
+@JsonIgnoreProperties(
+	value = { "roles" })
 public class User {
 
     @Id
@@ -39,7 +45,7 @@ public class User {
 
     private boolean tokenExpired;
 
-    @ManyToMany(fetch = FetchType.LAZY)
+    @ManyToMany(fetch = FetchType.LAZY, cascade = CascadeType.ALL)
     @JoinTable(
 	    name = "users_roles",
 	    joinColumns = @JoinColumn(
@@ -48,7 +54,7 @@ public class User {
 	    inverseJoinColumns = @JoinColumn(
 		    name = "role_id",
 		    referencedColumnName = "id"))
-    private Set<Role> roles;
+    private Set<Role> roles = new HashSet<Role>();
 
     @Override
     public String toString() {

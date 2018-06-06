@@ -4,6 +4,8 @@ import java.io.IOException;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.config.BeanDefinition;
+import org.springframework.context.annotation.Scope;
 import org.springframework.stereotype.Component;
 
 import com.vaadin.data.HasValue.ValueChangeEvent;
@@ -24,6 +26,7 @@ import dke.cbrm.persistence.model.ContextModel;
 import lombok.RequiredArgsConstructor;
 
 @Component
+@Scope(BeanDefinition.SCOPE_PROTOTYPE)
 @RequiredArgsConstructor(onConstructor = @__(@Autowired))
 public class UploadWindow extends Window {
 
@@ -40,17 +43,21 @@ public class UploadWindow extends Window {
 
     private VerticalLayout addNewContextModelVerticalLayout;
 
+    private Upload upload;
+
     @Value("${cbrm.workspace}")
     private String workspace;
 
     public void setUp() {
 	/** Add Upload-functionality **/
-	Upload upload = new Upload("Upload Here", receiver);
+	upload = new Upload("Upload Here", receiver);
 	receiver.setUpload(upload);
 	upload.addSucceededListener(receiver);
 	upload.setImmediateMode(false);
 	upload.setWidthUndefined();
 	upload.setButtonCaption(null);
+	
+	/** evaluate context model with all files given */
 	upload.addFinishedListener(new FinishedListener() {
 
 	    private static final long serialVersionUID = 9205434627955380881L;
@@ -63,7 +70,7 @@ public class UploadWindow extends Window {
 				.getFileName());
 		ctxModel.setContextsFolderPath(
 			addNewContextsFolderTextArea.getValue());
-		ctxModel.setModuleName(
+		ctxModel.setContextModelModuleName(
 			addNewContextModelModuleTextArea.getValue());
 		ctxModel.setName(addNewContextModelNameTextArea.getValue());
 
@@ -78,7 +85,7 @@ public class UploadWindow extends Window {
 		}
 
 		UploadWindow.this.close();
-		
+
 		Notification.show("Upload finished successfully: "
 			+ ((CbrmFileUploadReceiver) upload.getReceiver())
 				.getFileName(),
@@ -103,7 +110,7 @@ public class UploadWindow extends Window {
 
 		    @Override
 		    public void valueChange(ValueChangeEvent<String> event) {
-			uploadButton.setVisible(true);
+			uploadButton.setEnabled(allInputFieldsHaveInput());
 		    }
 		});
 
@@ -123,7 +130,7 @@ public class UploadWindow extends Window {
 
 		    @Override
 		    public void valueChange(ValueChangeEvent<String> event) {
-			uploadButton.setVisible(true);
+			uploadButton.setEnabled(allInputFieldsHaveInput());
 		    }
 		});
 	addNewContextModelVerticalLayout
@@ -133,12 +140,23 @@ public class UploadWindow extends Window {
 	addNewContextModelModuleTextArea.setCaption("Specify name of module");
 	addNewContextModelModuleTextArea.setWidth(300.0f, Unit.PIXELS);
 	addNewContextModelModuleTextArea.setHeight(40.0f, Unit.PIXELS);
+	addNewContextModelModuleTextArea
+		.addValueChangeListener(new ValueChangeListener<String>() {
+
+		    private static final long serialVersionUID =
+			    -4085940467295160836L;
+
+		    @Override
+		    public void valueChange(ValueChangeEvent<String> event) {
+			uploadButton.setEnabled(allInputFieldsHaveInput());
+		    }
+		});
 
 	addNewContextModelVerticalLayout
 		.addComponent(addNewContextModelModuleTextArea);
 
 	uploadButton = new Button("Upload and process new Context-Model");
-	uploadButton.setVisible(false);
+	uploadButton.setEnabled(false);
 	uploadButton.addClickListener(new ClickListener() {
 	    private static final long serialVersionUID = 5345313770300521424L;
 
@@ -150,6 +168,15 @@ public class UploadWindow extends Window {
 	addNewContextModelVerticalLayout.addComponent(uploadButton);
 
 	this.setContent(addNewContextModelVerticalLayout);
+    }
+
+    private boolean allInputFieldsHaveInput() {
+	if (addNewContextModelModuleTextArea.isEmpty()
+		|| addNewContextModelNameTextArea.isEmpty()
+		|| addNewContextsFolderTextArea.isEmpty()) {
+	    return false;
+	} else
+	    return true;
     }
 
 }

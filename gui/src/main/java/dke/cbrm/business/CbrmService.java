@@ -3,16 +3,21 @@ package dke.cbrm.business;
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
-import javax.transaction.Transactional;
+import javax.persistence.NonUniqueResultException;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.google.common.collect.Sets;
 
@@ -23,9 +28,11 @@ import dke.cbrm.persistence.model.DetParamValue;
 import dke.cbrm.persistence.model.ModificationApproval;
 import dke.cbrm.persistence.model.ModificationOperation;
 import dke.cbrm.persistence.model.ModificationOperationType;
+import dke.cbrm.persistence.model.Modifieable;
 import dke.cbrm.persistence.model.Parameter;
 import dke.cbrm.persistence.model.ParentChildRelation;
 import dke.cbrm.persistence.model.Rule;
+import dke.cbrm.persistence.model.User;
 import dke.cbrm.persistence.parser.FloraFileParser;
 import dke.cbrm.persistence.repositories.ContextModelRepository;
 import dke.cbrm.persistence.repositories.ContextRepository;
@@ -34,6 +41,7 @@ import dke.cbrm.persistence.repositories.ModificationApprovalRepository;
 import dke.cbrm.persistence.repositories.ModificationOperationRepository;
 import dke.cbrm.persistence.repositories.ParameterRepository;
 import dke.cbrm.persistence.repositories.RuleRepository;
+import dke.cbrm.persistence.repositories.UserRepository;
 import lombok.RequiredArgsConstructor;
 
 @Service
@@ -54,6 +62,8 @@ public class CbrmService {
 
     private final ModificationApprovalRepository modificationApprovalRepository;
 
+    private final UserRepository userRepository;
+
     private final CBRInterface cbrInterface;
 
     private FloraFileParser floraFileParser;
@@ -61,24 +71,36 @@ public class CbrmService {
     public void processNewContextModel(ContextModel ctxModel)
 	    throws IOException {
 	floraFileParser = new FloraFileParser(ctxModel);
-	Set<Context> newContexts = floraFileParser.readFileContentsFromFolder();
-	for (Context ctx : newContexts) {
-	    addOrUpdateContext(ctx);
-	}
+
+	cbrInterface.setContextModel(ctxModel);
+	cbrInterface.loadFile(ctxModel);
+
+	ctxModel.setContexts(floraFileParser.readFileContentsFromFolder());
+	addOrUpdateContextModel(ctxModel);
 
 	buildContextHierarchy(ctxModel);
+
 	buildParameterHierarchy(ctxModel);
 
-	relateDetParamValuesWithParameters(
-		getAllParametersOfContextModel(ctxModel.getName()));
+	buildContextParamaterRelations(ctxModel);
+
+	relateDetParamValuesWithParameters(ctxModel);
     }
 
-    public Iterator<Context> getAllContextsAvailable() {
-	return ctxRepository.findAll().iterator();
+    public Iterator<Context> getAllContextsOfContextModel(
+	    ContextModel ctxModel) {
+	return ctxRepository.getContextsForContextModel(ctxModel.getName())
+		.iterator();
     }
 
     public Iterator<Parameter> getAllParametersAvailable() {
 	return parameterRepository.findAll().iterator();
+    }
+
+    public Iterator<Parameter> getParametersOfContextModel(
+	    ContextModel ctxModel) {
+	return parameterRepository
+		.getAllParametersOfContextModel(ctxModel.getName()).iterator();
     }
 
     public Iterator<ContextModel> getAllContextModelsAvailable() {
@@ -113,7 +135,7 @@ public class CbrmService {
 	Set<Context> resChildren = new HashSet<Context>();
 
 	Iterator<Object[]> parentChildIter = ctxRepository
-		.getChildrenOfParent((parent).getContextId()).iterator();
+		.getChildrenOfParent(parent.getContextId()).iterator();
 
 	while (parentChildIter.hasNext()) {
 	    resChildren.add((Context) parentChildIter.next()[0]);
@@ -123,18 +145,45 @@ public class CbrmService {
 	return parent;
     }
 
+    public ContextModel getChildren(ContextModel ctxModel) {
+	Iterator<Context> iter = ctxModelRepository
+		.getAllContextsOfContextModel(ctxModel.getId()).iterator();
+	ctxModel.setContexts(Sets.newHashSet(iter));
+	return ctxModel;
+    }
+
+    public Context getParameters(Context ctx) {
+	Set<Parameter> resSet = Sets.newHashSet(parameterRepository
+		.getChildrenOfParent(ctx.getContextId()).iterator());
+	// while (iter.hasNext()) {
+	// resSet.add((Parameter) iter.next()[0]);
+	// }
+	ctx.setConstitutingParameterValues(resSet);
+	return ctx;
+    }
+
     public Parameter getChildren(Parameter parent) {
-	Set<Parameter> resChildren = new HashSet<Parameter>();
+	Set<Parameter> resChildren = Sets.newHashSet(parameterRepository
+		.getChildrenOfParent(parent.getParameterId()).iterator());
 
-	Iterator<Object[]> parentChildIter = parameterRepository
-		.getChildrenOfParent(parent.getParameterId()).iterator();
-
-	while (parentChildIter.hasNext()) {
-	    resChildren.add((Parameter) parentChildIter.next()[0]);
-	}
+	// while (parentChildIter.hasNext()) {
+	// resChildren.add((Parameter) parentChildIter.next()[0]);
+	// }
 
 	parent.setChildren(resChildren);
 	return parent;
+    }
+
+    public Context loadParametersOfContext(Context ctx) {
+	Iterable<Parameter> paramsIter =
+		parameterRepository.getParametersOfContext(ctx.getContextId());
+	ctx.setConstitutingParameterValues(
+		Sets.newHashSet(paramsIter.iterator()));
+	return ctx;
+    }
+
+    public Parameter getParamaterFromParameterValue(Parameter param) {
+	return parameterRepository.getParentParameter(param.getParameterId());
     }
 
     public void addOrUpdateContext(Context ctx) {
@@ -145,6 +194,7 @@ public class CbrmService {
 	parameterRepository.save(param);
     }
 
+    @Transactional
     public void addOrUpdateContextModel(ContextModel ctxModel) {
 	ctxModelRepository.save(ctxModel);
     }
@@ -167,25 +217,22 @@ public class CbrmService {
     }
 
     public Optional<Context> findContext(String contextName,
-	    String contextModel) {
-	return Optional.ofNullable(
-		ctxRepository.getContextByName(contextName, contextModel));
+	    Long contextModelId) throws NonUniqueResultException {
+	return Optional.ofNullable(ctxRepository
+		.getOnlyValidContextByName(contextName, contextModelId));
     }
 
-    public Optional<Parameter> findParameter(String parameterValue) {
-	return Optional.ofNullable(
-		parameterRepository.getParameterByName(parameterValue));
+    public Optional<Parameter> findParameter(String parameterValue,
+	    String contextModelName) {
+	return Optional.ofNullable(parameterRepository
+		.getParameterByName(parameterValue, contextModelName));
     }
 
     public Iterator<Parameter> getAllParametersOfContextModel(
-	    String contextModel) {
-	Set<Parameter> resultSet = new HashSet<Parameter>();
-	Iterator<Object[]> iter = parameterRepository
-		.getAllParametersOfContextModel(contextModel).iterator();
-	while (iter.hasNext()) {
-	    resultSet.add((Parameter) iter.next()[0]);
-	}
-	return resultSet.iterator();
+	    ContextModel contextModel) {
+	return parameterRepository
+		.getAllParametersOfContextModel(contextModel.getName())
+		.iterator();
     }
 
     /**
@@ -194,14 +241,13 @@ public class CbrmService {
      * 
      * @throws IOException
      */
-    public void relateDetParamValuesWithParameters(Iterator<Parameter> iter)
+    public void relateDetParamValuesWithParameters(ContextModel ctxModel)
 	    throws IOException {
 
+	Iterator<Parameter> iter = getAllParametersOfContextModel(ctxModel);
 	Set<DetParamValue> detParamValuesSet = null;
 	List<String> detParamsFound = null;
 
-	// Iterator<Parameter> iter =
-	// cbrmService.getAllParametersOfContextModel(ctxModel.getName());
 	while (iter.hasNext()) {
 	    Parameter parameter = iter.next();
 	    if (parameter.getParent() == null) {
@@ -215,6 +261,7 @@ public class CbrmService {
 
 		    detParamValue.setCreatedAt(now);
 		    detParamValue.setModifiedAt(now);
+		    detParamValue.setValidFrom(now);
 		    detParamValue.setContent(value);
 		    detParamValue.setParameter(parameter);
 
@@ -235,12 +282,9 @@ public class CbrmService {
      * @param subContextName
      * @throws IOException
      */
+    @Transactional
     private void buildContextHierarchy(ContextModel contextModel)
 	    throws IOException {
-
-	cbrInterface.setContextModel(contextModel);
-	cbrInterface.loadFile(contextModel);
-
 	Iterator<String[]> iter = cbrInterface.getCtxHierarchy().iterator();
 
 	while (iter.hasNext()) {
@@ -252,48 +296,55 @@ public class CbrmService {
 	    Context subContext = null;
 	    Context origParentContext = null;
 
-	    Optional<Context> pc =
-		    findContext(superContextName, contextModel.getName());
-	    if (pc.isPresent()) {
-		parentContext = pc.get();
-	    } else {
-		parentContext = new Context();
-		parentContext.setValue(superContextName);
-	    }
+	    try {
+		Optional<Context> pc =
+			findContext(superContextName, contextModel.getId());
 
-	    Optional<Context> sc =
-		    findContext(subContextName, contextModel.getName());
-	    if (sc.isPresent()) {
-		subContext = sc.get();
-		origParentContext = subContext.getParent();
-	    } else {
-		subContext = new Context();
-		subContext.setCreatedAt(LocalDateTime.now());
-		subContext.setValue(subContextName);
-	    }
-
-	    /** Put Context into Parent and child relation **/
-	    if (origParentContext == null || (!origParentContext.getParent()
-		    .getValue().equals(superContextName)
-		    && newParentLowerInHierarchy(origParentContext,
-			    parentContext))) {
-
-		subContext.setParent(parentContext);
-		subContext.setModifiedAt(LocalDateTime.now());
-
-		parentContext = getChildren(parentContext);
-		parentContext.getChildren().add(subContext);
-		if (origParentContext != null) {
-		    origParentContext.getChildren().remove(subContext);
-		    origParentContext.setModifiedAt(LocalDateTime.now());
-
-		    addOrUpdateContext(origParentContext);
+		if (pc.isPresent()) {
+		    parentContext = pc.get();
+		} else {
+		    parentContext = new Context();
+		    parentContext.setValue(superContextName);
 		}
+
+		Optional<Context> sc =
+			findContext(subContextName, contextModel.getId());
+		if (sc.isPresent()) {
+		    subContext = sc.get();
+		    origParentContext = subContext.getParent();
+		} else {
+		    subContext = new Context();
+		    subContext.setCreatedAt(LocalDateTime.now());
+		    subContext.setValue(subContextName);
+		}
+
+		/** Put Context into Parent and child relation **/
+		if (origParentContext == null || (!origParentContext.getParent()
+			.getValue().equals(superContextName)
+			&& newParentLowerInHierarchy(origParentContext,
+				parentContext))) {
+
+		    subContext.setParent(parentContext);
+		    subContext.setModifiedAt(LocalDateTime.now());
+
+		    parentContext = getChildren(parentContext);
+		    parentContext.getChildren().add(subContext);
+		    if (origParentContext != null) {
+			origParentContext.getChildren().remove(subContext);
+			origParentContext.setModifiedAt(LocalDateTime.now());
+
+			addOrUpdateContext(origParentContext);
+		    }
+		}
+
+		/** save / update the creations / updates in repository **/
+		addOrUpdateContext(parentContext);
+		addOrUpdateContext(subContext);
+
+	    } catch (NonUniqueResultException e) {
+		e.printStackTrace();
 	    }
 
-	    /** save / update the creations / updates in repository **/
-	    addOrUpdateContext(parentContext);
-	    addOrUpdateContext(subContext);
 	}
     }
 
@@ -321,9 +372,8 @@ public class CbrmService {
 
     public void buildParameterHierarchy(ContextModel ctxModel) {
 	try {
-	    cbrInterface.setContextModel(ctxModel);
-	    cbrInterface.loadFile(ctxModel);
-
+	    ctxModel.setParameters(
+		    Sets.newHashSet(getAllParametersOfContextModel(ctxModel)));
 	    List<String> rootParameters = cbrInterface.getParameters();
 
 	    for (String rootParameterValue : rootParameters) {
@@ -335,7 +385,9 @@ public class CbrmService {
 		rootParam.setValue(rootParameterValue);
 		rootParam.setCreatedAt(now);
 		rootParam.setModifiedAt(now);
+		rootParam.setValidFrom(now);
 		rootParam.setBelongsToContextModel(ctxModel);
+		ctxModel.getParameters().add(rootParam);
 
 		Parameter rootChildParam = null;
 
@@ -343,7 +395,7 @@ public class CbrmService {
 
 		    Parameter parentParam = null;
 		    Optional<Parameter> parentParamOpt =
-			    findParameter(valueRelation[0]);
+			    findParameter(valueRelation[0], ctxModel.getName());
 
 		    if (parentParamOpt.isPresent()) {
 			parentParam = parentParamOpt.get();
@@ -353,7 +405,9 @@ public class CbrmService {
 			now = LocalDateTime.now();
 			parentParam.setCreatedAt(now);
 			parentParam.setModifiedAt(now);
+			parentParam.setValidFrom(now);
 			parentParam.setBelongsToContextModel(ctxModel);
+			ctxModel.getParameters().add(parentParam);
 		    }
 
 		    if (parentParam.getParent() == null) {
@@ -363,7 +417,7 @@ public class CbrmService {
 		    Parameter origParentParam = null;
 		    Parameter subParam = new Parameter();
 		    Optional<Parameter> subParamOpt =
-			    findParameter(valueRelation[1]);
+			    findParameter(valueRelation[1], ctxModel.getName());
 		    if (subParamOpt.isPresent()) {
 			subParam = subParamOpt.get();
 			origParentParam = subParam.getParent();
@@ -373,8 +427,10 @@ public class CbrmService {
 			now = LocalDateTime.now();
 			subParam.setCreatedAt(now);
 			subParam.setModifiedAt(now);
+			subParam.setValidFrom(now);
 			subParam.setParent(parentParam);
 			subParam.setBelongsToContextModel(ctxModel);
+			ctxModel.getParameters().add(subParam);
 		    }
 
 		    /**
@@ -419,38 +475,235 @@ public class CbrmService {
 	ruleRepository.delete(rule);
     }
 
-    private Set<ModificationApproval> createApprovalsForContextAndModificationOperation(
-	    ModificationOperation modOp, Set<Context> ctxChildren,
-	    LocalDateTime now) {
-	Set<ModificationApproval> resList = new HashSet<ModificationApproval>();
-	for (Context context : ctxChildren) {
-	    ModificationApproval modOpApp = new ModificationApproval();
-	    modOpApp.setCreatedAt(now);
-	    modOpApp.setModifiedAt(now);
+    private void buildContextParamaterRelations(ContextModel ctxModel) {
+	Iterator<Context> iter = ctxRepository
+		.getContextsForContextModel(ctxModel.getName()).iterator();
 
-	    modOpApp.setApprovedContext(context);
-	    modOpApp.setModificationOperationApproved(modOp);
-	    resList.add(modOpApp);
+	while (iter.hasNext()) {
+	    Context ctx = iter.next();
+	    ctx = getParameters(ctx);
+	    System.out.println(
+		    ctx.getValue() + " has following Parameter Values: ");
+
+	    List<String[]> parametersOfContext;
+	    try {
+		parametersOfContext = cbrInterface.getCtxInfo(ctx.getValue());
+		for (int i = 0; i < parametersOfContext.size(); i++) {
+		    String[] array = parametersOfContext.get(i);
+		    String parameterSearched = array[1];
+		    System.out.println(parameterSearched);
+
+		    Parameter param = parameterRepository.getParameterByName(
+			    parameterSearched, ctxModel.getName());
+		    ctx.getConstitutingParameterValues().add(param);
+		}
+		addOrUpdateContext(ctx);
+	    } catch (IOException e) {
+
+	    }
 	}
+    }
+
+    private Set<ModificationApproval> createApprovalsForContextAndModificationOperation(
+	    ModificationOperation modOp, Modifieable modifiedObject,
+	    Context contextAffected, LocalDateTime now) {
+	Set<ModificationApproval> resList = new HashSet<ModificationApproval>();
+
+	if (contextAffected != null) {
+	    for (Context context : contextAffected.getChildren()) {
+		ModificationApproval modOpApp = new ModificationApproval();
+		modOpApp.setCreatedAt(now);
+		modOpApp.setModifiedAt(now);
+
+		modOpApp.setApprovedContext(context);
+		modOpApp.setModificationOperationApproved(modOp);
+		resList.add(modOpApp);
+	    }
+	}
+
 	return resList;
     }
 
-    public ModificationOperation createModificationOperation(String value,
-	    String string, ModificationOperationType addRule,
-	    Context contextSelected) {
+    public ModificationOperation createModificationOperation(
+	    ModificationOperationType modOpType, Modifieable modifiedObject,
+	    Context contextAffected, Rule ruleAffected,
+	    Parameter parameterAffected) {
 	LocalDateTime now = LocalDateTime.now();
 	ModificationOperation modOp = new ModificationOperation();
-	modOp.setContentBefore("");
-	modOp.setContentAfter(value);
 	modOp.setCreatedAt(now);
 	modOp.setModifiedAt(now);
-	modOp.setModificationOperationType(ModificationOperationType.ADD_RULE);
-	modOp.getApprovals()
-		.addAll(createApprovalsForContextAndModificationOperation(modOp,
-			contextSelected.getChildren(), now));
+	modOp.setCreatedBy(userRepository.findByUserName(SecurityContextHolder
+		.getContext().getAuthentication().getName()));
+	modOp.setModificationOperationType(modOpType);
+
+	// modOp.getApprovals()
+	// .addAll(createApprovalsForContextAndModificationOperation(modOp,
+	// modifiedObject, contextAffected, now));
+
+	switch (modOpType) {
+	case ADD_CONTEXT:
+	    modOp.setContextAffected(contextAffected);
+	    break;
+	case ADD_CONTEXT_CLASS:
+	    break;
+	case ADD_PARAMETER:
+	    modOp.setParameterAffected((Parameter) modifiedObject);
+	    break;
+	case ADD_RULE:
+	    modOp.setRuleAffected((Rule) modifiedObject);
+	    break;
+	case DELETE_CONTEXT:
+	    modOp.setContextAffected(contextAffected);
+	    break;
+	case DELETE_CONTEXT_CLASS:
+	    break;
+	case DELETE_PARAMETER:
+	    modOp.setParameterAffected((Parameter) modifiedObject);
+	    break;
+	case DELETE_RULE:
+	    modOp.setRuleAffected((Rule) modifiedObject);
+	    break;
+	case MODIFY_PARAMETER:
+	    modOp.setParameterAffected((Parameter) modifiedObject);
+	    break;
+	default:
+	    break;
+	}
+
+	modOp.setContextAffected(contextAffected);
 	addOrUpdateModificationOperation(modOp);
 
 	return modOp;
+    }
+
+    /**
+     * Evaluates a given @link{ModificationOperation} regarding
+     * allowedUsers of a @link{Context}
+     * 
+     * @param modOp
+     *            the @link{ModificationOperataion} to evaluate
+     * @return affected Users
+     */
+    public Set<User> getAffectedUsersFromModOp(ModificationOperation modOp) {
+	Set<User> affectedUsers = new HashSet<User>();
+	if (modOp.getContextAffected() != null) {
+	    addUsersFromNextContextHierarchy(modOp.getContextAffected(),
+		    affectedUsers);
+	}
+	return affectedUsers;
+    }
+
+    /**
+     * Recursively adds assigned {@link User}s from all children-contexts
+     * beginning with given @{link Context}
+     * 
+     * @param ctx
+     * @param affectedUsers
+     */
+    private void addUsersFromNextContextHierarchy(Context ctx,
+	    Set<User> affectedUsers) {
+	affectedUsers.addAll(Sets.newHashSet(
+		userRepository.getAllowedUsersByContextId(ctx.getContextId())));
+	ctx = getChildren(ctx);
+	for (Context childCtx : ctx.getChildren()) {
+	    addUsersFromNextContextHierarchy(childCtx, affectedUsers);
+	}
+    }
+
+    public Set<ModificationOperation> getModificationOperationsForUser(
+	    String userName) {
+	Set<ModificationOperation> res = new HashSet<ModificationOperation>();
+	Set<ModificationOperation> initialModOpsNotApproved =
+		Sets.newHashSet(modificationOperationRepository
+			.getNotApprovedAndInitialModOps());
+
+	for (ModificationOperation modOp : initialModOpsNotApproved) {
+	    if (modOp.getContextAffected() != null) {
+		Set<User> affectedUsers = getAffectedUsersFromModOp(modOp);
+		if (affectedUsers.stream()
+			.filter(x -> x.getUserName().equals(userName)).findAny()
+			.isPresent()) {
+		    res.add(modOp);
+		}
+	    }
+	}
+
+	return res;
+    }
+
+    /**
+     * @param initialContext
+     * @{link Context} also holding constitutingParameters
+     * @return Map with Key for Parameter and Values being further Map
+     *         with Key being the Parameter-Value highest in hierarchy
+     *         followed by a Set of parameter values on levels below
+     */
+    public Map<Parameter, Map<Parameter, Set<Parameter>>> getChildrenParametersForContext(
+	    Context initialContext) {
+	Map<Parameter, Map<Parameter, Set<Parameter>>> resultMap =
+		new HashMap<Parameter, Map<Parameter, Set<Parameter>>>();
+
+	initialContext = loadParametersOfContext(initialContext);
+
+	// Set<Parameter> rootParams =
+	// Sets.newHashSet(parameterRepository.getRootParentParameters(
+	// initialContext.getInstantiatesContextModel().getId()));
+
+	for (Parameter param : initialContext
+		.getConstitutingParameterValues()) {
+	    Parameter p = getParamaterFromParameterValue(param);
+
+	    if (p != null) {
+		Set<Parameter> childrenParameter = Sets
+			.newHashSet(parameterRepository.getParameterValuesBelow(
+				param.getParameterId()));
+		Map<Parameter, Set<Parameter>> paramValuesMap =
+			new HashMap<Parameter, Set<Parameter>>();
+		paramValuesMap.put(param, childrenParameter);
+		resultMap.put(p, paramValuesMap);
+	    }
+	}
+
+	// for (Parameter param : rootParams) {
+	// resultMap.put(param, Sets.newHashSet(parameterRepository
+	// .getChildrenOfParent(param.getParameterId())));
+	// }
+	return resultMap;
+    }
+
+    /**
+     * Instantiate new Context with given Parameters and parent context
+     * 
+     * @param values
+     *            Parameter values constituting the newly created Context
+     * @param initialContext
+     *            the parent Context of the new one
+     */
+    public void createContext(Collection<Parameter> values,
+	    Context initialContext) {
+	LocalDateTime now = LocalDateTime.now();
+	Context ctx = new Context();
+	ctx.setCreatedAt(now);
+	ctx.setModifiedAt(now);
+	ctx.setValidFrom(now);
+	ctx.setConstitutingParameterValues(new HashSet<Parameter>(values));
+	ctx.setParent(initialContext);
+	ctx.setInstantiatesContextModel(
+		initialContext.getInstantiatesContextModel());
+
+	addOrUpdateContext(ctx);
+    }
+
+    public boolean contextWithParametersExistsYet(ContextModel ctxModel,
+	    Collection<Parameter> params) {
+	// Set<Long> paramterIds =
+	// params.stream().map(Parameter::getParameterId).collect(Collectors.toSet());
+	Iterator<Context> ctxIter = parameterRepository
+		.findContextWithParameters(ctxModel.getId(), params).iterator();
+	while (ctxIter.hasNext()) {
+	    System.out.println(ctxIter.next().getValue());
+	}
+	return ctxIter != null;
     }
 
 }

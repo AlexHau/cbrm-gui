@@ -13,8 +13,10 @@ public interface RoleRepository
     public Role findByName(
 	    @Param("roleName") String roleName);
 
-    @Query("from Role role left join role.users users where users.userName = :userName")
-    public Iterable<Object[]> getRolesByUserName(
-	    @Param("userName") String userName);
-
+    @Query("select role from Role role left join role.users")
+    public Iterable<Role> getAllRolesWithUsers();
+    
+    @Query("select role from Role role left join role.users users where users.id = :userId")
+    public Iterable<Role> getRolesByUserId(
+	    @Param("userId") Long userId);
 }

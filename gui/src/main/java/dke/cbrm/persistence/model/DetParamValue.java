@@ -23,7 +23,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 @EqualsAndHashCode(exclude = { "parameter" })
-public class DetParamValue {
+public class DetParamValue implements Modifieable {
 
     private @Id @GeneratedValue @Column(
 	    name = "ID") Long id;
@@ -35,7 +35,7 @@ public class DetParamValue {
     private Parameter parameter;
 
     @Convert(converter = LocalDateTimeConverter.class)
-    private LocalDateTime createdAt, modifiedAt;
+    private LocalDateTime createdAt, modifiedAt, validTo, validFrom;
 
     private String content;
 }

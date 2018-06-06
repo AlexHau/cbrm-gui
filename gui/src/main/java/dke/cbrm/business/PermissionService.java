@@ -27,12 +27,14 @@ public class PermissionService {
 
     private final RoleRepository roleRepository;
 
+    public Iterable<User> getAllExistingUsers() {
+	return userRepository.findAll();
+    }
+
     public boolean userAllowedToEditContextRules(Context context,
 	    String userName) {
 	Iterator<User> allowedUsersIter = userRepository
-		.getAllowedUsersByContextIdAndRole(context.getContextId(),
-			CbrmConstants.UserRoles.ROLE_RULE_DEV)
-		.iterator();
+		.getAllowedUsersByContextId(context.getContextId()).iterator();
 	while (allowedUsersIter.hasNext()) {
 	    User u = allowedUsersIter.next();
 	    if (u.getUserName().equals(userName)) {
@@ -43,18 +45,17 @@ public class PermissionService {
     }
 
     public Iterable<User> getAllowedRuleDevsForContext(Context ctx) {
-	return userRepository.getAllowedUsersByContextIdAndRole(
-		ctx.getContextId(), CbrmConstants.UserRoles.ROLE_RULE_DEV);
+	return userRepository.getAllowedUsersByContextId(ctx.getContextId());
     }
 
     public boolean userHasRoleSpecified(String userName, String roleName) {
 	User user = userRepository.findByUserName(userName);
 
 	if (user != null) {
-	    Iterator<Object[]> roles =
-		    roleRepository.getRolesByUserName(userName).iterator();
+	    Iterator<Role> roles =
+		    roleRepository.getRolesByUserId(user.getId()).iterator();
 	    while (roles.hasNext()) {
-		Role role = (Role) roles.next()[0];
+		Role role = roles.next();
 		if (role.getName().equals(roleName)) {
 		    return true;
 		}
@@ -83,11 +84,8 @@ public class PermissionService {
     }
 
     public void loadAllowedUsersOfContext(Context ctx) {
-	Iterator<User> iter =
-		userRepository
-			.getAllowedUsersByContextIdAndRole(ctx.getContextId(),
-				CbrmConstants.UserRoles.ROLE_RULE_DEV)
-			.iterator();
+	Iterator<User> iter = userRepository
+		.getAllowedUsersByContextId(ctx.getContextId()).iterator();
 	Set<User> loadedUsers = new HashSet<User>();
 	while (iter.hasNext()) {
 	    User user = iter.next();
@@ -97,11 +95,33 @@ public class PermissionService {
 	ctx.setAllowedUsers(loadedUsers);
     }
 
-    private User loadRolesOfAllowedUsers(User user) {
+    public User loadRolesOfAllowedUsers(User user) {
 	user.setRoles(Sets.newHashSet(
 		userRepository.loadRoleForUser(user.getId()).iterator()));
 	return user;
 
     }
+
+    public Iterable<Role> getRolesForUser(Long userId) {
+	return roleRepository.getRolesByUserId(userId);
+    }
+    
+    @SuppressWarnings("unchecked")
+    public Collection<Role>  getRolesNotForUser(Long userId) {
+	Set<Role> rolesForUser = Sets.newHashSet(getRolesForUser(userId));
+	Set<Role> allRoles = Sets.newHashSet(getAllExistingRoles());
+	
+	return CollectionUtils.subtract(allRoles, rolesForUser);
+    }
+
+    public Iterable<Role> getAllExistingRoles() {
+	return roleRepository.getAllRolesWithUsers();
+    }
+
+    public void updateUser(User userSelected) {
+	userRepository.save(userSelected);
+    }
+    
+    
 
 }

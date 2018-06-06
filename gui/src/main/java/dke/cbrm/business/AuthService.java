@@ -15,6 +15,7 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
 
+import dke.cbrm.CbrmConstants;
 import dke.cbrm.persistence.model.Privilege;
 import dke.cbrm.persistence.model.Role;
 import dke.cbrm.persistence.model.User;
@@ -37,16 +38,25 @@ public class AuthService implements UserDetailsService {
 
 	User user = userRepository.findByUserName(userName);
 	if (user == null) {
-	    return new org.springframework.security.core.userdetails.User(
-		    " ", " ", true, true, true, true,
-		    getAuthorities(Arrays.asList(
-			    roleRepository.findByName("ROLE_USER"))));
+	    return new org.springframework.security.core.userdetails.User(" ",
+		    " ", true, true, true, true, getAuthorities(Arrays
+			    .asList(roleRepository.findByName("ROLE_USER"))));
 	}
 
 	return new org.springframework.security.core.userdetails.User(
-		user.getUserName(), user.getPassword(),
-		user.isEnabled(), true, true, true,
-		getAuthorities(user.getRoles()));
+		user.getUserName(), user.getPassword(), user.isEnabled(), true,
+		true, true, getAuthorities(user.getRoles()));
+    }
+
+    public boolean registerNewUser(User user) {
+	User foundUser = userRepository.findByEmail(user.getEmail());
+	if (foundUser == null) {
+	    user.setEnabled(true);
+	    userRepository.save(user);
+	    return true;
+	}
+
+	return false;
     }
 
     private Collection<? extends GrantedAuthority> getAuthorities(

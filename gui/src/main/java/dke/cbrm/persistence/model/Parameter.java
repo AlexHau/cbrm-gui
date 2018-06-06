@@ -21,7 +21,7 @@ import lombok.EqualsAndHashCode;
 @Entity
 @Data
 @EqualsAndHashCode(exclude = { "parent", "children", "detParamValues" })
-public class Parameter implements ParentChildRelation<Parameter> {
+public class Parameter implements ParentChildRelation<Parameter>, Modifieable {
 
     private @Id @GeneratedValue @Column(name = "parameter_id") Long parameterId;
 
@@ -29,13 +29,13 @@ public class Parameter implements ParentChildRelation<Parameter> {
 
     @ManyToOne
     private ContextModel belongsToContextModel;
-    
+
     @Convert(converter = LocalDateTimeConverter.class)
-    private LocalDateTime createdAt, modifiedAt;
+    private LocalDateTime createdAt, modifiedAt, validTo, validFrom;
 
     @ManyToOne
     private Parameter parent;
-    
+
     @OneToMany(
 	    mappedBy = "parent",
 	    cascade = CascadeType.ALL,
@@ -47,4 +47,9 @@ public class Parameter implements ParentChildRelation<Parameter> {
 	    cascade = CascadeType.ALL,
 	    fetch = FetchType.LAZY)
     private Set<DetParamValue> detParamValues = new HashSet<DetParamValue>();
+
+    @Override
+    public String toString() {
+	return value;
+    }
 }

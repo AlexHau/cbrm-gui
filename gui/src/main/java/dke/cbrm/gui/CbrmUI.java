@@ -5,11 +5,12 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 import java.util.regex.Matcher;
 
+import org.atmosphere.config.service.Get;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 
 import com.google.common.collect.Sets;
@@ -18,13 +19,13 @@ import com.vaadin.annotations.Push;
 import com.vaadin.annotations.Theme;
 import com.vaadin.data.HasValue.ValueChangeEvent;
 import com.vaadin.data.HasValue.ValueChangeListener;
-import com.vaadin.data.TreeData;
 import com.vaadin.data.provider.TreeDataProvider;
 import com.vaadin.event.selection.SelectionEvent;
 import com.vaadin.event.selection.SelectionListener;
 import com.vaadin.event.selection.SingleSelectionEvent;
 import com.vaadin.event.selection.SingleSelectionListener;
 import com.vaadin.icons.VaadinIcons;
+import com.vaadin.server.Page;
 import com.vaadin.server.VaadinRequest;
 import com.vaadin.server.VaadinSession;
 import com.vaadin.shared.communication.PushMode;
@@ -48,19 +49,23 @@ import com.vaadin.ui.Window.CloseEvent;
 import com.vaadin.ui.Window.CloseListener;
 
 import dke.cbrm.CbrmConstants;
+import dke.cbrm.CbrmUtils;
 import dke.cbrm.business.CbrmService;
 import dke.cbrm.business.PermissionService;
+import dke.cbrm.business.statemachine.CbrmStateService;
 import dke.cbrm.gui.Broadcaster.BroadcastListener;
+import dke.cbrm.gui.dto.DetParamValueComponent;
+import dke.cbrm.gui.dto.RuleComponent;
 import dke.cbrm.persistence.model.Context;
 import dke.cbrm.persistence.model.ContextModel;
 import dke.cbrm.persistence.model.DetParamValue;
 import dke.cbrm.persistence.model.ModificationOperation;
 import dke.cbrm.persistence.model.ModificationOperationType;
 import dke.cbrm.persistence.model.Parameter;
-import dke.cbrm.persistence.model.ParentChildRelation;
 import dke.cbrm.persistence.model.Rule;
 import dke.cbrm.persistence.model.User;
 import dke.cbrm.persistence.parser.FloraFileParser;
+import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 
 /**
@@ -76,29 +81,52 @@ import lombok.RequiredArgsConstructor;
 @Theme("guitheme")
 @Push(PushMode.MANUAL)
 @RequiredArgsConstructor(onConstructor = @__(@Autowired))
-public class CbrmUI extends UI implements BroadcastListener {
+public class CbrmUI extends UI implements BroadcastListener, CbrmView {
 
     private static final long serialVersionUID = 811817939183044951L;
 
     @Value("${cbrm.workspace}")
     private String workspace;
 
-    private static final String VALUE_PROPERTY_OF_PARENT_CHILD = "value";
+    private static final String PAGE_TITLE = "CBRM - GUI";
+
+    public static final String VALUE_PROPERTY_OF_PARENT_CHILD = "value";
+
+    public static final String PARAMETER_PROPERTY_OF_PARENT_CHILD =
+	    "constitutingParameterValues";
+
+    private final CbrmStateService cbrmStateService;
 
     private final CbrmService cbrmService;
 
     private final PermissionService permissionService;
 
+    private final TreeGridCommons treeGridCommons;
+
     private final UploadWindow uploadWindow;
 
-    @SuppressWarnings("rawtypes")
-    private TreeGrid<ParentChildRelation> contextTreeGrid, parameterTreeGrid;
+    private final ContextSplitWindow contextSplitWindow;
+
+    private final UserManagementTab managementTab;
+
+    private final ModOpsUI modOpsUi;
+
+    private final SendMessageComponent sendMessageComponent;
+
+    private TreeGrid<Context> contextTreeGrid;
+
+    private TreeGrid<Parameter> parameterTreeGrid;
+
+    private TreeDataProvider<Context> contextDataProvider;
+
+    private TreeDataProvider<Parameter> parameterDataProvider;
 
     private Button logOutButton, addDetParamValueButton,
 	    addNewRuleToContextButton, saveNewRuleToContextButton,
 	    saveAddDetParamValueButton, abortAddDetParamValueButton,
 	    abortAddNewRuleToContextButton, startUploadButton,
-	    addToAllowedUsersButton, deleteFromAllowedUsersButton;
+	    addToAllowedUsersButton, deleteFromAllowedUsersButton,
+	    splitContextButton;
 
     private TextArea addNewDetParamValueTextArea, addNewRuleToContextTextArea;
 
@@ -106,26 +134,29 @@ public class CbrmUI extends UI implements BroadcastListener {
 
     private Grid<User> allowedUsersTable, notAllowedUsersTable;
 
+    @Getter
     private Context contextSelected;
 
     private ContextModel currentContextModel;
 
     private Parameter parameterSelected;
 
-    private List<ModificationOperation> modificationOperationsInterestedIn;
-
     private VerticalLayout mainVerticalLayout, vParameterLayout,
 	    vContextMgmtLayout, vContextLayout;
 
-    private HorizontalLayout hMainContextLayout;
+    private HorizontalLayout hMainContextLayout, hMainModOpLayout,
+	    hUserButtonLayout, hRulesButtonLayout, hModOpsButtonLayout;
 
     private TabSheet tabSheet;
 
-    private List<Component> detParamValuesToEdit, rulesToEdit;
+    private List<RuleComponent> rulesToEdit;
 
-    private boolean isRepoAdmin, isRuleDev, allowedToEditContextSelected;
+    private List<DetParamValueComponent> detParamValuesToEdit;
 
-    private String loggedInUser;
+    private boolean isRepoAdmin, isRuleDev, isUser, isDomainExpert,
+	    allowedToEditContextSelected;
+
+    private Authentication loggedInUser;
 
     @SuppressWarnings({ "rawtypes", "unchecked" })
     @Override
@@ -136,17 +167,19 @@ public class CbrmUI extends UI implements BroadcastListener {
 	 * from @link{BroadCaster}
 	 */
 	Broadcaster.register(this);
+	ViewUpdater.registerView(this);
 
 	determineUserSessionRoles();
 
-	rulesToEdit = new ArrayList<Component>();
-	detParamValuesToEdit = new ArrayList<Component>();
+	rulesToEdit = new ArrayList<RuleComponent>();
+	detParamValuesToEdit = new ArrayList<DetParamValueComponent>();
 
 	tabSheet = new TabSheet();
 	tabSheet.setSizeFull();
 	mainVerticalLayout = new VerticalLayout();
 
-	Label userLabel = new Label("Logged in: ".concat(loggedInUser));
+	Label userLabel =
+		new Label("Logged in: ".concat(loggedInUser.getName()));
 	HorizontalLayout hTopLayout = new HorizontalLayout();
 	hTopLayout.addComponent(userLabel);
 
@@ -179,9 +212,11 @@ public class CbrmUI extends UI implements BroadcastListener {
 			if (currentContextModel != null) {
 			    createContextTreeGrid();
 			    createParameterTreeGrid();
+			    createModOpGrid();
 			} else {
 			    tabSheet.removeComponent(hMainContextLayout);
 			    tabSheet.removeComponent(vParameterLayout);
+			    tabSheet.removeComponent(hMainModOpLayout);
 			}
 		    }
 		});
@@ -215,13 +250,16 @@ public class CbrmUI extends UI implements BroadcastListener {
 			    cbrmService.getAllContextModelsAvailable()));
 		}
 	    });
+
+	    refreshUserTables();
+	    createUserRoleManagement();
 	}
 
 	mainVerticalLayout.addComponent(hTopLayout);
-
 	mainVerticalLayout.addComponent(tabSheet);
 
 	setContent(mainVerticalLayout);
+	Page.getCurrent().setTitle(PAGE_TITLE);
     }
 
     /**
@@ -230,13 +268,21 @@ public class CbrmUI extends UI implements BroadcastListener {
      * (edit - Buttons etc.)
      */
     private void determineUserSessionRoles() {
-	loggedInUser = SecurityContextHolder.getContext().getAuthentication()
-		.getName();
+	loggedInUser = SecurityContextHolder.getContext().getAuthentication();
 
-	isRepoAdmin = permissionService.userHasRoleSpecified(loggedInUser,
-		CbrmConstants.UserRoles.ROLE_REPO_ADMIN);
-	isRuleDev = permissionService.userHasRoleSpecified(loggedInUser,
-		CbrmConstants.UserRoles.ROLE_RULE_DEV);
+	isRepoAdmin =
+		permissionService.userHasRoleSpecified(loggedInUser.getName(),
+			CbrmConstants.UserRoles.ROLE_REPO_ADMIN);
+
+	isUser = permissionService.userHasRoleSpecified(loggedInUser.getName(),
+		CbrmConstants.UserRoles.ROLE_USER);
+
+	isDomainExpert =
+		permissionService.userHasRoleSpecified(loggedInUser.getName(),
+			CbrmConstants.UserRoles.ROLE_DOMAIN_EXPERT);
+
+	isRuleDev = permissionService.userHasRoleSpecified(
+		loggedInUser.getName(), CbrmConstants.UserRoles.ROLE_RULE_DEV);
     }
 
     /**
@@ -251,72 +297,79 @@ public class CbrmUI extends UI implements BroadcastListener {
      *        ROLE_REPO_ADIN granted this privilege before
      * 
      */
-    @SuppressWarnings({ "rawtypes", "unchecked" })
     private void createContextTreeGrid() {
-	this.contextTreeGrid = new TreeGrid<>(ParentChildRelation.class);
+	splitContextButton = new Button("Split context");
+	splitContextButton.addClickListener(new Button.ClickListener() {
 
-	TreeDataProvider<ParentChildRelation> contextDataProvider =
-		(TreeDataProvider<ParentChildRelation>) contextTreeGrid
-			.getDataProvider();
+	    private static final long serialVersionUID = 1174302638872298509L;
 
-	Iterator<Context> ctxIter = cbrmService.getAllContextsAvailable();
-	while (ctxIter.hasNext()) {
-	    Context ctx = ctxIter.next();
-	    if (ctx.getParent() == null) {
-		addItemsToTreeGrid(contextDataProvider.getTreeData(), ctx);
+	    @Override
+	    public void buttonClick(ClickEvent event) {
+		if (contextSelected != null) {
+
+		    contextSplitWindow.setUp(contextSelected);
+		    contextSplitWindow.center();
+		    addWindow(contextSplitWindow);
+		    // first get administrator input for new contexts (maybe
+		    // also new parameter values needed)
+		    // cbrmService.splitContext(contextSelected,
+		    // firstNewContext, secondNewContext);
+		} else {
+		    Notification.show("No context selected: ",
+			    "split only possible with specified context",
+			    Notification.Type.ERROR_MESSAGE);
+		}
 	    }
-	}
-	contextDataProvider.refreshAll();
+	});
+	splitContextButton.setEnabled(false);
+	splitContextButton.setVisible(isRepoAdmin);
 
-	contextTreeGrid.addSelectionListener(
-		new SelectionListener<ParentChildRelation>() {
+	refreshContextsDisplayed();
 
-		    private static final long serialVersionUID =
-			    4605665120072805744L;
+	contextTreeGrid.addSelectionListener(new SelectionListener<Context>() {
 
-		    @Override
-		    public void selectionChange(
-			    SelectionEvent<ParentChildRelation> event) {
+	    private static final long serialVersionUID = 4605665120072805744L;
 
-			for (Component comp : rulesToEdit) {
-			    vContextLayout.removeComponent(comp);
-			}
+	    @Override
+	    public void selectionChange(SelectionEvent<Context> event) {
 
-			if (event.getFirstSelectedItem().isPresent()) {
-			    contextSelected = (Context) event
-				    .getFirstSelectedItem().get();
-			}
+		for (RuleComponent comp : rulesToEdit) {
+		    vContextLayout.removeComponent(comp.getComponent());
+		}
 
-			allowedToEditContextSelected =
-				isRuleDev && permissionService
-					.userAllowedToEditContextRules(
-						contextSelected, loggedInUser);
+		if (event.getFirstSelectedItem().isPresent()) {
+		    contextSelected =
+			    (Context) event.getFirstSelectedItem().get();
+		}
 
-			if (allowedToEditContextSelected) {
-			    addNewRuleToContextButton.setVisible(true);
-			    if (addNewRuleToContextTextArea.isVisible()) {
-				addNewRuleToContextButton.setEnabled(false);
-			    } else {
-				addNewRuleToContextButton.setEnabled(true);
-			    }
-			} else {
-			    addNewRuleToContextTextArea.setVisible(false);
-			    saveNewRuleToContextButton.setVisible(false);
-			    addNewRuleToContextButton.setVisible(false);
-			}
+		allowedToEditContextSelected = isRuleDev
+			&& permissionService.userAllowedToEditContextRules(
+				contextSelected, loggedInUser.getName());
 
-			refreshRulesDisplayed(allowedToEditContextSelected);
-
-			if (isRepoAdmin) {
-			    refreshUserTables();
-			}
+		if (allowedToEditContextSelected) {
+		    addNewRuleToContextButton.setVisible(true);
+		    if (addNewRuleToContextTextArea.isVisible()) {
+			addNewRuleToContextButton.setEnabled(false);
+		    } else {
+			addNewRuleToContextButton.setEnabled(true);
 		    }
+		} else {
+		    addNewRuleToContextTextArea.setVisible(false);
+		    saveNewRuleToContextButton.setVisible(false);
+		    addNewRuleToContextButton.setVisible(false);
+		}
 
-		});
+		splitContextButton
+			.setEnabled(!cbrmStateService.stateMachineIsRunning());
 
-	contextTreeGrid.setColumns(VALUE_PROPERTY_OF_PARENT_CHILD);
-	contextTreeGrid.getColumn(VALUE_PROPERTY_OF_PARENT_CHILD)
-		.setCaption("Context Name");
+		refreshRulesDisplayed(allowedToEditContextSelected);
+	    }
+
+	});
+
+	contextTreeGrid.setColumns(PARAMETER_PROPERTY_OF_PARENT_CHILD);
+	contextTreeGrid.getColumn(PARAMETER_PROPERTY_OF_PARENT_CHILD)
+		.setCaption("Paramaters determining Context");
 	contextTreeGrid.setCaption("Context - Hierarchy");
 	contextTreeGrid.setColumnReorderingAllowed(true);
 	contextTreeGrid.setResponsive(true);
@@ -345,29 +398,27 @@ public class CbrmUI extends UI implements BroadcastListener {
 			.matcher(addNewRuleToContextTextArea.getValue());
 
 		if (matcher.find()) {
-		    Rule rule = new Rule();
-		    LocalDateTime now = LocalDateTime.now();
-		    rule.setCreatedAt(now);
-		    rule.setModifiedAt(now);
-
-		    rule.setRuleName(matcher.find() ? matcher.group(1) : "");
-		    rule.setRuleContent(addNewRuleToContextTextArea.getValue());
-		    rule.setRelatesTo(contextSelected);
-
-		    cbrmService.addOrUpdateRule(rule);
-
 		    addNewRuleToContextButton.setEnabled(true);
 		    saveNewRuleToContextButton.setVisible(false);
 		    addNewRuleToContextTextArea.setVisible(false);
 
 		    refreshRulesDisplayed(allowedToEditContextSelected);
 
-		    ModificationOperation modOp = cbrmService.createModificationOperation(
-			    addNewRuleToContextTextArea.getValue(), "",
-			    ModificationOperationType.ADD_RULE,
-			    contextSelected);
-		    
-		    Broadcaster.broadcast(modOp);
+		    LocalDateTime now = LocalDateTime.now();
+		    Rule rule = new Rule();
+		    rule.setCreatedAt(now);
+		    rule.setModifiedAt(now);
+		    rule.setRelatesTo(contextSelected);
+		    rule.setRuleName(matcher.group(1));
+		    rule.setRuleContent(matcher.group());
+
+		    ModificationOperation modOp =
+			    cbrmService.createModificationOperation(
+				    ModificationOperationType.ADD_RULE, null,
+				    contextSelected, null, null);
+
+		    Broadcaster.broadcast(modOp,
+			    cbrmService.getAffectedUsersFromModOp(modOp));
 		} else {
 		    Notification.show(
 			    "No adequate Rule - Name! (e.g.: '@!{R102}') ",
@@ -399,12 +450,25 @@ public class CbrmUI extends UI implements BroadcastListener {
 	abortAddNewRuleToContextButton = new Button("Abort");
 	abortAddNewRuleToContextButton.setVisible(false);
 
-	HorizontalLayout hButtonLayout = new HorizontalLayout();
-	hButtonLayout.addComponent(addNewRuleToContextButton);
-	hButtonLayout.addComponent(abortAddNewRuleToContextButton);
-	hButtonLayout.addComponent(saveNewRuleToContextButton);
+	hRulesButtonLayout = new HorizontalLayout();
+	hRulesButtonLayout.addComponent(addNewRuleToContextButton);
+	hRulesButtonLayout.addComponent(abortAddNewRuleToContextButton);
+	hRulesButtonLayout.addComponent(saveNewRuleToContextButton);
 
-	vContextLayout.addComponent(hButtonLayout);
+	hModOpsButtonLayout = new HorizontalLayout();
+
+	if (isRepoAdmin) {
+	    hModOpsButtonLayout.addComponent(splitContextButton);
+	}
+
+	if (isUser || isDomainExpert) {
+	    sendMessageComponent.initialize(this);
+	    hModOpsButtonLayout.addComponent(sendMessageComponent);
+	}
+
+	vContextLayout.addComponent(hRulesButtonLayout);
+	vContextLayout.addComponent(hModOpsButtonLayout);
+
 	addNewRuleToContextButton.addClickListener(new ClickListener() {
 
 	    private static final long serialVersionUID = 389080120548279502L;
@@ -434,67 +498,83 @@ public class CbrmUI extends UI implements BroadcastListener {
 		"Context-Hierarchy with related Rules");
 
 	if (isRepoAdmin) {
-	    vContextMgmtLayout = new VerticalLayout();
-	    hMainContextLayout.addComponent(vContextMgmtLayout);
-
-	    allowedUsersTable = new Grid<User>(User.class);
-	    allowedUsersTable.setCaption("Allowed Users");
-	    removeColumnsFromUser(allowedUsersTable);
-	    allowedUsersTable.setSizeFull();
-	    vContextMgmtLayout.addComponent((Component) allowedUsersTable);
-
-	    deleteFromAllowedUsersButton =
-		    new Button("Delete Users", VaadinIcons.MINUS);
-	    deleteFromAllowedUsersButton.addClickListener(new ClickListener() {
-
-		private static final long serialVersionUID =
-			5803835677170663489L;
-
-		@Override
-		public void buttonClick(ClickEvent event) {
-		    if (!allowedUsersTable.getSelectedItems().isEmpty()) {
-			for (User user : allowedUsersTable.getSelectedItems()) {
-			    permissionService
-				    .loadAllowedUsersOfContext(contextSelected);
-			    contextSelected.getAllowedUsers().remove(user);
-			}
-			cbrmService.addOrUpdateContext(contextSelected);
-			refreshUserTables();
-		    }
-		}
-
-	    });
-	    vContextMgmtLayout.addComponent(deleteFromAllowedUsersButton);
-
-	    notAllowedUsersTable = new Grid<User>(User.class);
-	    notAllowedUsersTable.setCaption("Not allowed Users");
-	    removeColumnsFromUser(notAllowedUsersTable);
-	    notAllowedUsersTable.setSizeFull();
-	    vContextMgmtLayout.addComponent((Component) notAllowedUsersTable);
-
-	    addToAllowedUsersButton = new Button("Add Users", VaadinIcons.PLUS);
-	    addToAllowedUsersButton.addClickListener(new ClickListener() {
-
-		private static final long serialVersionUID =
-			6832371039240031280L;
-
-		@Override
-		public void buttonClick(ClickEvent event) {
-		    if (!notAllowedUsersTable.getSelectedItems().isEmpty()) {
-			for (User user : notAllowedUsersTable
-				.getSelectedItems()) {
-			    permissionService
-				    .loadAllowedUsersOfContext(contextSelected);
-			    contextSelected.getAllowedUsers().add(user);
-			}
-			cbrmService.addOrUpdateContext(contextSelected);
-			refreshUserTables();
-		    }
-		}
-
-	    });
-	    vContextMgmtLayout.addComponent(addToAllowedUsersButton);
+	    createContextUsersManagement();
 	}
+    }
+
+    private void createUserRoleManagement() {
+	managementTab.instantiate();
+	tabSheet.addTab(managementTab, "User Role Management");
+    }
+
+    private void createContextUsersManagement() {
+	vContextMgmtLayout = new VerticalLayout();
+	hMainContextLayout.addComponent(vContextMgmtLayout);
+
+	allowedUsersTable = new Grid<User>(User.class);
+	allowedUsersTable.setCaption("Allowed Users");
+	CbrmUtils.removeColumnsFromUser(allowedUsersTable);
+	allowedUsersTable.setSizeFull();
+	vContextMgmtLayout.addComponent((Component) allowedUsersTable);
+
+	deleteFromAllowedUsersButton =
+		new Button("Delete Users", VaadinIcons.MINUS);
+	deleteFromAllowedUsersButton.addClickListener(new ClickListener() {
+
+	    private static final long serialVersionUID = 5803835677170663489L;
+
+	    @Override
+	    public void buttonClick(ClickEvent event) {
+		if (!allowedUsersTable.getSelectedItems().isEmpty()) {
+		    for (User user : allowedUsersTable.getSelectedItems()) {
+			permissionService
+				.loadAllowedUsersOfContext(contextSelected);
+			contextSelected.getAllowedUsers().remove(user);
+		    }
+		    cbrmService.addOrUpdateContext(contextSelected);
+		    refreshUserTables();
+		}
+	    }
+	});
+
+	addToAllowedUsersButton = new Button("Add Users", VaadinIcons.PLUS);
+	addToAllowedUsersButton.addClickListener(new ClickListener() {
+
+	    private static final long serialVersionUID = 6832371039240031280L;
+
+	    @Get
+
+	    @Override
+	    public void buttonClick(ClickEvent event) {
+		if (!notAllowedUsersTable.getSelectedItems().isEmpty()) {
+		    for (User user : notAllowedUsersTable.getSelectedItems()) {
+			permissionService
+				.loadAllowedUsersOfContext(contextSelected);
+			contextSelected.getAllowedUsers().add(user);
+		    }
+		    cbrmService.addOrUpdateContext(contextSelected);
+		    refreshUserTables();
+		}
+	    }
+
+	});
+
+	hUserButtonLayout = new HorizontalLayout(addToAllowedUsersButton,
+		deleteFromAllowedUsersButton);
+	vContextMgmtLayout.addComponent(hUserButtonLayout);
+
+	notAllowedUsersTable = new Grid<User>(User.class);
+	notAllowedUsersTable.setCaption("Not allowed Users");
+	CbrmUtils.removeColumnsFromUser(notAllowedUsersTable);
+	notAllowedUsersTable.setSizeFull();
+	vContextMgmtLayout.addComponent((Component) notAllowedUsersTable);
+    }
+
+    private void createModOpGrid() {
+	modOpsUi.initialize(loggedInUser);
+	hMainModOpLayout = new HorizontalLayout(modOpsUi);
+	hMainModOpLayout.setSizeFull();
+	tabSheet.addTab(hMainModOpLayout, "Open Modification Operations");
     }
 
     /**
@@ -510,15 +590,35 @@ public class CbrmUI extends UI implements BroadcastListener {
 		cbrmService.getRulesByContextName(contextSelected.getValue(),
 			currentContextModel.getName()).iterator();
 
-	for (Component comp : rulesToEdit) {
-	    vContextLayout.removeComponent(comp);
+	for (RuleComponent comp : rulesToEdit) {
+	    vContextLayout.removeComponent(comp.getComponent());
 	}
 
-	rulesToEdit = new ArrayList<Component>();
+	rulesToEdit = new ArrayList<RuleComponent>();
 
 	while (rules.hasNext()) {
 	    addRuleToTable(rules.next(), allowedToEdit);
 	}
+    }
+
+    @SuppressWarnings({ "unchecked" })
+    private void refreshContextsDisplayed() {
+	this.contextTreeGrid = new TreeGrid<>(Context.class);
+
+	contextDataProvider =
+		(TreeDataProvider<Context>) contextTreeGrid.getDataProvider();
+	Iterator<Context> ctxIter =
+		cbrmService.getAllContextsOfContextModel(currentContextModel);
+
+	while (ctxIter.hasNext()) {
+	    Context ctx = ctxIter.next();
+	    if (ctx.getParent() == null) {
+		treeGridCommons.addItemsToTreeGrid(
+			contextDataProvider.getTreeData(), ctx, contextTreeGrid,
+			true);
+	    }
+	}
+	contextDataProvider.refreshAll();
     }
 
     /**
@@ -526,62 +626,51 @@ public class CbrmUI extends UI implements BroadcastListener {
      * selected @link{Context} into corresponding Grid
      */
     private void refreshUserTables() {
-	Iterable<User> allowedUsersForContext =
-		permissionService.getAllowedRuleDevsForContext(contextSelected);
+	if (contextSelected != null) {
+	    Iterable<User> allowedUsersForContext = permissionService
+		    .getAllowedRuleDevsForContext(contextSelected);
 
-	allowedUsersTable.setItems(Sets.newHashSet(allowedUsersForContext));
+	    allowedUsersTable.setItems(Sets.newHashSet(allowedUsersForContext));
 
-	List<User> notAllowedUsersForContext = (List<User>) permissionService
-		.getNotAllowedUsersForContext(allowedUsersForContext);
+	    List<User> notAllowedUsersForContext =
+		    (List<User>) permissionService.getNotAllowedUsersForContext(
+			    allowedUsersForContext);
 
-	notAllowedUsersTable.setItems(notAllowedUsersForContext);
+	    notAllowedUsersTable.setItems(notAllowedUsersForContext);
+	}
     }
 
-    /**
-     * Formats / removes Columns from Grid displaying {@link User}s
-     * 
-     * @param table
-     *            the Grid to be formatted
-     */
-    private void removeColumnsFromUser(Grid<User> table) {
-	table.removeColumn("id");
-	table.removeColumn("roles");
-	table.removeColumn("password");
-	table.removeColumn("enabled");
-	table.removeColumn("tokenExpired");
-    }
-
-    @SuppressWarnings("rawtypes")
+    @SuppressWarnings("unchecked")
     private void createParameterTreeGrid() {
-	this.parameterTreeGrid = new TreeGrid<>(ParentChildRelation.class);
+	this.parameterTreeGrid = new TreeGrid<>(Parameter.class);
 
-	@SuppressWarnings("unchecked")
-	TreeDataProvider<ParentChildRelation> parameterDataProvider =
-		(TreeDataProvider<ParentChildRelation>) parameterTreeGrid
-			.getDataProvider();
+	parameterDataProvider = (TreeDataProvider<Parameter>) parameterTreeGrid
+		.getDataProvider();
 
-	Iterator<Parameter> paramIter = cbrmService
-		.getAllParametersOfContextModel(currentContextModel.getName());
+	Iterator<Parameter> paramIter =
+		cbrmService.getAllParametersOfContextModel(currentContextModel);
 	while (paramIter.hasNext()) {
 	    Parameter param = paramIter.next();
 	    if (param.getParent() == null) {
-		addItemsToTreeGrid(parameterDataProvider.getTreeData(), param);
+		treeGridCommons.addItemsToTreeGrid(
+			parameterDataProvider.getTreeData(), param,
+			parameterTreeGrid, true);
 	    }
 	}
 
 	parameterDataProvider.refreshAll();
-	parameterTreeGrid.addSelectionListener(
-		new SelectionListener<ParentChildRelation>() {
+	parameterTreeGrid
+		.addSelectionListener(new SelectionListener<Parameter>() {
 
 		    private static final long serialVersionUID =
 			    4605665120072805744L;
 
 		    @Override
 		    public void selectionChange(
-			    SelectionEvent<ParentChildRelation> event) {
-
-			for (Component comp : detParamValuesToEdit) {
-			    vParameterLayout.removeComponent(comp);
+			    SelectionEvent<Parameter> event) {
+			for (DetParamValueComponent comp : detParamValuesToEdit) {
+			    vParameterLayout
+				    .removeComponent(comp.getComponent());
 			}
 
 			if (event.getFirstSelectedItem().isPresent()) {
@@ -601,7 +690,8 @@ public class CbrmUI extends UI implements BroadcastListener {
 				    cbrmService.getDetParamValuesByParameterId(
 					    parameterSelected.getParameterId());
 
-			    detParamValuesToEdit = new ArrayList<Component>();
+			    detParamValuesToEdit =
+				    new ArrayList<DetParamValueComponent>();
 
 			    while (detParamValues.hasNext()) {
 				DetParamValue detParamValue =
@@ -623,6 +713,8 @@ public class CbrmUI extends UI implements BroadcastListener {
 		});
 
 	parameterTreeGrid.setColumns(VALUE_PROPERTY_OF_PARENT_CHILD);
+	parameterTreeGrid.getColumn(VALUE_PROPERTY_OF_PARENT_CHILD)
+		.setCaption("Parameter Value");
 	parameterTreeGrid.setColumnReorderingAllowed(true);
 	parameterTreeGrid.setResponsive(true);
 	parameterTreeGrid.setSizeFull();
@@ -654,11 +746,23 @@ public class CbrmUI extends UI implements BroadcastListener {
 		abortAddDetParamValueButton.setVisible(true);
 		abortAddDetParamValueButton.setEnabled(true);
 
+		LocalDateTime now = LocalDateTime.now();
+		DetParamValue detParamValue = new DetParamValue();
+		detParamValue.setCreatedAt(now);
+		detParamValue.setModifiedAt(now);
+		detParamValue
+			.setContent(addNewDetParamValueTextArea.getValue());
+		detParamValue.setParameter(parameterSelected);
+
+		cbrmService.createModificationOperation(
+			ModificationOperationType.MODIFY_PARAMETER,
+			detParamValue, contextSelected, null, null);
 		ModificationOperation modOp = new ModificationOperation();
 		modOp.setModificationOperationType(
 			ModificationOperationType.MODIFY_PARAMETER);
 
-		Broadcaster.broadcast(modOp);
+		Broadcaster.broadcast(modOp,
+			cbrmService.getAffectedUsersFromModOp(modOp));
 	    }
 	});
 
@@ -751,7 +855,8 @@ public class CbrmUI extends UI implements BroadcastListener {
 		    }
 		});
 	vParameterLayout.addComponent(detParamValueTextArea);
-	detParamValuesToEdit.add(detParamValueTextArea);
+	detParamValuesToEdit.add(new DetParamValueComponent(detParamValue,
+		detParamValueTextArea));
 
 	if (allowedToEdit) {
 	    editButton = new Button("Edit");
@@ -771,7 +876,8 @@ public class CbrmUI extends UI implements BroadcastListener {
 	    hLayout.addComponent(editButton);
 	    hLayout.addComponent(saveChangesButton);
 	    vParameterLayout.addComponent(hLayout);
-	    detParamValuesToEdit.add(hLayout);
+	    detParamValuesToEdit
+		    .add(new DetParamValueComponent(detParamValue, hLayout));
 	}
     }
 
@@ -799,7 +905,7 @@ public class CbrmUI extends UI implements BroadcastListener {
 	    }
 	});
 	vContextLayout.addComponent(rulesTextArea);
-	rulesToEdit.add(rulesTextArea);
+	rulesToEdit.add(new RuleComponent(rule, rulesTextArea));
 
 	if (allowedToEdit) {
 	    editButton = new Button("Edit");
@@ -841,12 +947,18 @@ public class CbrmUI extends UI implements BroadcastListener {
 
 		@Override
 		public void buttonClick(ClickEvent event) {
-		    cbrmService.deleteRule(contextSelected, rule);
-		    refreshRulesDisplayed(allowedToEdit);
+		    // cbrmService.deleteRule(contextSelected, rule);
+		    // refreshRulesDisplayed(allowedToEdit);
+
+		    cbrmService.createModificationOperation(
+			    ModificationOperationType.DELETE_RULE, rule,
+			    contextSelected, rule, null);
+
 		    ModificationOperation modOp = new ModificationOperation();
 		    modOp.setModificationOperationType(
 			    ModificationOperationType.DELETE_RULE);
-		    Broadcaster.broadcast(modOp);
+		    Broadcaster.broadcast(modOp,
+			    cbrmService.getAffectedUsersFromModOp(modOp));
 		}
 	    });
 
@@ -855,47 +967,7 @@ public class CbrmUI extends UI implements BroadcastListener {
 	    hLayout.addComponent(deleteButton);
 	    hLayout.addComponent(saveChangesButton);
 	    vContextLayout.addComponent(hLayout);
-	    rulesToEdit.add(hLayout);
-	}
-    }
-
-    /**
-     * Recursively iterates with the first given @{link
-     * ParentChildRelation}-parent-Object through resulting Object-Tree
-     * and adds them to @{link TreeData}
-     * 
-     * @param data
-     *            the data to be displayed
-     * @param parent
-     *            the Context to be iterated through
-     */
-    @SuppressWarnings({ "unchecked", "rawtypes" })
-    private void addItemsToTreeGrid(TreeData<ParentChildRelation> data,
-	    ParentChildRelation parent) {
-
-	if (parent.getParent() == null) {
-	    data.addItem(null, parent);
-	}
-
-	if (parent instanceof Context) {
-	    parent = cbrmService.getChildren((Context) parent);
-	} else {
-	    parent = cbrmService.getChildren((Parameter) parent);
-	}
-
-	if (!parent.getChildren().isEmpty()) {
-	    data.addItems(parent, parent.getChildren());
-	    for (ParentChildRelation child : (Set<ParentChildRelation>) parent
-		    .getChildren()) {
-		addItemsToTreeGrid(data, child);
-	    }
-	}
-
-	/** expand the parent node, to finally render a fully expanded tree */
-	if (parent instanceof Context) {
-	    contextTreeGrid.expand(parent);
-	} else {
-	    parameterTreeGrid.expand(parent);
+	    rulesToEdit.add(new RuleComponent(rule, hLayout));
 	}
     }
 
@@ -910,16 +982,22 @@ public class CbrmUI extends UI implements BroadcastListener {
     }
 
     @Override
-    public void receiveBroadcast(ModificationOperation message) {
+    public void receiveBroadcast(ModificationOperation modOp) {
 	access(new Runnable() {
 	    @Override
 	    public void run() {
-		System.out.println(loggedInUser + " received broadcast");
+		System.out.println(
+			loggedInUser.getName() + " received broadcast");
 		Notification n = new Notification("Modification Operation",
-			message.getModificationOperationType().name(),
+			modOp.getModificationOperationType().name()
+				+ System.lineSeparator()
+				+ "was created by User: "
+				+ modOp.getCreatedBy().getUserName(),
 			Type.TRAY_NOTIFICATION);
 		n.setDelayMsec(-1);
 		n.show(getPage());
+
+		modOpsUi.addModificationOperation(modOp);
 	    }
 	});
     }
@@ -933,5 +1011,14 @@ public class CbrmUI extends UI implements BroadcastListener {
     public void detach() {
 	Broadcaster.unregister(this);
 	super.detach();
+    }
+
+    public Authentication getLoggedInUser() {
+	return loggedInUser;
+    }
+
+    @Override
+    public void updateView() {
+	this.refreshContextsDisplayed();
     }
 }

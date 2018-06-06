@@ -13,19 +13,16 @@ import lombok.Getter;
 public enum ModificationOperationType {
 
     ADD_PARAMETER(0),
-    DELETE_PARAMETER(1),
-    MODIFY_PARAMETER(2),
-    ADD_RULE(3),
-    DELETE_RULE(4),
-    MODIFY_RULE(5),
-    ADD_CONTEXT(6),
-    DELETE_CONTEXT(7),
-    MODIFY_CONTEXT(8),
+    ADD_PARAMETER_VALUE(1),
+    DELETE_PARAMETER(2),
+    DELETE_PARAMETER_VALUE(3),
+    MODIFY_PARAMETER(4),
+    ADD_RULE(5),
+    DELETE_RULE(6),
+    ADD_CONTEXT(7),
+    DELETE_CONTEXT(8),
     ADD_CONTEXT_CLASS(9),
-    DELETE_CONTEXT_CLASS(10),
-    MODIFY_CONTEXT_CLASS(11),
-    MODIFY_BUSINESS_CASE(12),
-    MODIFY_BUSINESS_CASE_CLASS(13);
+    DELETE_CONTEXT_CLASS(10);
 
     private ModificationOperationType(int id) {
 	this.id = id;

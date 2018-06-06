@@ -469,6 +469,7 @@ public class FloraFileParser {
 	Context context = new Context();
 	context.setCreatedAt(now);
 	context.setModifiedAt(now);
+	context.setValidFrom(now);
 	context.setFilePath(filePath);
 
 	context.setInstantiatesContextModel(ctxModel);
@@ -491,6 +492,7 @@ public class FloraFileParser {
 
 	    rule.setCreatedAt(now);
 	    rule.setModifiedAt(now);
+	    rule.setValidFrom(now);
 	    rule.setRuleContent(ruleContent);
 	    rule.setRuleName(ruleName);
 

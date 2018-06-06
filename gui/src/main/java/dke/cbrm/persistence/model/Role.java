@@ -33,6 +33,17 @@ public class Role {
     @ManyToMany(mappedBy = "roles")
     private Collection<User> users;
 
+    @Override
+    public boolean equals(Object role2) {
+
+	return role2 == null ? false : this.id.equals(((Role) role2).id);
+    }
+
+    @Override
+    public int hashCode() {
+	return id.hashCode() + name.hashCode();
+    }
+
     @ManyToMany
     @JoinTable(
 	    name = "roles_privileges",

@@ -17,6 +17,8 @@ import javax.persistence.ManyToMany;
 import javax.persistence.ManyToOne;
 import javax.persistence.OneToMany;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
 import dke.cbrm.persistence.LocalDateTimeConverter;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -29,15 +31,18 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 @EqualsAndHashCode(
 	exclude = { "parent", "children", "rules", "allowedUsers",
-		"constitutingPrameterValues" })
-public class Context implements ParentChildRelation<Context> {
+		"constitutingParameterValues" })
+@JsonIgnoreProperties(
+	value = { "parent", "children", "rules", "allowedUsers",
+		"constitutingPrameterValues", "createdAt", "modifiedAt" })
+public class Context implements ParentChildRelation<Context>, Modifieable {
 
     private @Id @GeneratedValue @Column(name = "CTX_ID") Long contextId;
 
     private String value, filePath;
 
     @Convert(converter = LocalDateTimeConverter.class)
-    private LocalDateTime createdAt, modifiedAt;
+    private LocalDateTime createdAt, modifiedAt, validTo, validFrom;
 
     @ManyToOne
     private Context parent;
@@ -66,8 +71,9 @@ public class Context implements ParentChildRelation<Context> {
 	    inverseJoinColumns = @JoinColumn(
 		    name = "parameter_id",
 		    referencedColumnName = "parameter_id"))
-    private Set<Parameter> constitutingPrameterValues;
-    
+    private Set<Parameter> constitutingParameterValues =
+	    new HashSet<Parameter>();
+
     @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(
 	    name = "users_contexts",

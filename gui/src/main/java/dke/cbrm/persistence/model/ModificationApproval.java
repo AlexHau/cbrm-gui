@@ -9,6 +9,7 @@ import javax.persistence.GeneratedValue;
 import javax.persistence.Id;
 import javax.persistence.JoinColumn;
 import javax.persistence.ManyToOne;
+import javax.persistence.OneToOne;
 
 import dke.cbrm.persistence.LocalDateTimeConverter;
 import lombok.Data;
@@ -26,6 +27,10 @@ public class ModificationApproval {
     @ManyToOne
     @JoinColumn(name = "CTX_APPROVED_ID")
     private Context approvedContext;
+    
+    @OneToOne
+    @JoinColumn(name = "MOD_OP_FOR_APPROVAL")
+    private ModificationOperation modOpForApproval;
 
     @Convert(converter = LocalDateTimeConverter.class)
     private LocalDateTime approvedAt, createdAt, modifiedAt;
