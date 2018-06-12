@@ -1,0 +1,25 @@
+version: '2.1'
+services:
+  web:
+    container_name: cbrm_webapp
+    build: .
+    ports:
+      - 8080
+    depends_on:
+      - db
+  db:
+    container_name: cbrm_db
+    image: postgres:9.5
+    volumes:
+      - cbrm_db:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_PASSWORD=cbrm
+      - POSTGRES_USER=cbrm
+      - POSTGRES_DB=cbrm
+      - PGDATA=/var/lib/postgresql/data/pgdata
+      - PG_TRUST_LOCALNET=true
+    ports:
+      - 5433
+volumes:
+  cbrm_db: {
+    }
